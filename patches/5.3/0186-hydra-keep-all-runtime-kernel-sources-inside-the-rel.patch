@@ -1,0 +1,153 @@
+From da96dad5a901ecfa10c400381ea1ec4996de95a5 Mon Sep 17 00:00:00 2001
+From: BDE <dev@bde.run>
+Date: Tue, 17 Nov 2026 12:05:38 +0100
+Subject: [PATCH] hydra: keep all runtime kernel sources inside the relocatable
+ Houdini package
+
+---
+ src/hydra/CMakeLists.txt               |  4 +--
+ src/kernel/CMakeLists.txt              | 38 ++++++++++++++++----------
+ src/kernel/device/cuda/CMakeLists.txt  |  4 +--
+ src/kernel/device/hip/CMakeLists.txt   |  4 +--
+ src/kernel/device/hiprt/CMakeLists.txt |  8 +++---
+ src/kernel/device/metal/CMakeLists.txt |  4 +--
+ src/kernel/device/optix/CMakeLists.txt |  4 +--
+ 7 files changed, 37 insertions(+), 29 deletions(-)
+
+diff --git a/src/hydra/CMakeLists.txt b/src/hydra/CMakeLists.txt
+index d13bf778..7748c5a0 100644
+--- a/src/hydra/CMakeLists.txt
++++ b/src/hydra/CMakeLists.txt
+@@ -228,8 +228,8 @@ if(WITH_CYCLES_HYDRA_RENDER_DELEGATE)
+         "${CYCLES_HYDRA_INSTALL_PATH}/usd_plugins/${HdCyclesPluginName}"
+         "${CYCLES_HYDRA_INSTALL_PATH}/usd/${HdCyclesPluginName}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+       file(RELATIVE_PATH PLUG_INFO_RESOURCE_PATH
+-        "${CYCLES_HYDRA_INSTALL_PATH}/${HdCyclesPluginName}"
+-        "${CYCLES_INSTALL_PATH}")
++        "${CYCLES_HYDRA_INSTALL_PATH}/usd_plugins/${HdCyclesPluginName}"
++        "${CYCLES_INSTALL_PATH}/houdini")
+     else()
+       file(RELATIVE_PATH
+         PLUG_INFO_LIBRARY_PATH
+diff --git a/src/kernel/CMakeLists.txt b/src/kernel/CMakeLists.txt
+index 3eed0feb..2190ba22 100644
+--- a/src/kernel/CMakeLists.txt
++++ b/src/kernel/CMakeLists.txt
+@@ -2,6 +2,14 @@
+ #
+ # SPDX-License-Identifier: Apache-2.0
+ 
++# The Hydra plugin's resource root is the relocatable Houdini package. Metal
++# always compiles from these sources; CUDA/OptiX can also need them at runtime.
++if(HOUDINI_FOUND)
++  set(CYCLES_KERNEL_SOURCE_PATH "${CYCLES_INSTALL_PATH}/houdini/source")
++else()
++  set(CYCLES_KERNEL_SOURCE_PATH "${CYCLES_INSTALL_PATH}/source")
++endif()
++
+ set(INC
+   ..
+ )
+@@ -404,21 +412,21 @@ source_group("util" FILES ${SRC_KERNEL_UTIL_HEADERS})
+ # -----------------------------------------------------------------------------
+ # Install kernel source for runtime compilation.
+ 
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_BAKE_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/bake)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_BVH_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/bvh)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_CAMERA_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/camera)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_CLOSURE_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/closure)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_GPU_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/device/gpu)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_FILM_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/film)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_GEOM_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/geom)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_INTEGRATOR_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/integrator)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_LIGHT_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/light)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_OSL_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/osl)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_SAMPLE_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/sample)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_SVM_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/svm)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_TYPES_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_UTIL_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/util)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_UTIL_HEADERS}" ${CYCLES_INSTALL_PATH}/source/util)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_BAKE_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/bake)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_BVH_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/bvh)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_CAMERA_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/camera)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_CLOSURE_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/closure)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_GPU_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/gpu)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_FILM_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/film)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_GEOM_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/geom)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_INTEGRATOR_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/integrator)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_LIGHT_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/light)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_OSL_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/osl)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_SAMPLE_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/sample)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_SVM_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/svm)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_TYPES_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_UTIL_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/util)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_UTIL_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/util)
+ 
+ # -----------------------------------------------------------------------------
+ # OSL module.
+diff --git a/src/kernel/device/cuda/CMakeLists.txt b/src/kernel/device/cuda/CMakeLists.txt
+index 4ffffa04..ff83e98b 100644
+--- a/src/kernel/device/cuda/CMakeLists.txt
++++ b/src/kernel/device/cuda/CMakeLists.txt
+@@ -347,5 +347,5 @@ if(WITH_CYCLES_CUDA_BINARIES)
+   add_dependencies(cycles_kernel cycles_kernel_cuda)
+ endif()
+ 
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_CUDA}" ${CYCLES_INSTALL_PATH}/source/kernel/device/cuda)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_CUDA_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/device/cuda)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_CUDA}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/cuda)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_CUDA_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/cuda)
+diff --git a/src/kernel/device/hip/CMakeLists.txt b/src/kernel/device/hip/CMakeLists.txt
+index 8a12aa6d..8eec8563 100644
+--- a/src/kernel/device/hip/CMakeLists.txt
++++ b/src/kernel/device/hip/CMakeLists.txt
+@@ -122,5 +122,5 @@ if(WITH_CYCLES_HIP_BINARIES AND WITH_CYCLES_DEVICE_HIP)
+   add_dependencies(cycles_kernel cycles_kernel_hip)
+ endif()
+ 
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_HIP}" ${CYCLES_INSTALL_PATH}/source/kernel/device/hip)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_HIP_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/device/hip)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_HIP}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/hip)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_HIP_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/hip)
+diff --git a/src/kernel/device/hiprt/CMakeLists.txt b/src/kernel/device/hiprt/CMakeLists.txt
+index 9f48fb9b..750fa4c4 100644
+--- a/src/kernel/device/hiprt/CMakeLists.txt
++++ b/src/kernel/device/hiprt/CMakeLists.txt
+@@ -136,9 +136,9 @@ if(WITH_CYCLES_HIP_BINARIES AND WITH_CYCLES_DEVICE_HIPRT)
+   add_dependencies(cycles_kernel cycles_kernel_hip)
+ endif()
+ 
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_HIPRT}" ${CYCLES_INSTALL_PATH}/source/kernel/device/hiprt)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_HIPRT_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/device/hiprt)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_HIPRT}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/hiprt)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_HIPRT_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/hiprt)
+ if(WITH_CYCLES_DEVICE_HIPRT)
+-  delayed_install(${HIPRT_INCLUDE_DIR}        "${SRC_KERNEL_DEVICE_HIPRT_SDK_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/device/hiprt/hiprt)
+-  delayed_install(${HIPRT_INCLUDE_DIR}        "${SRC_KERNEL_DEVICE_HIPRT_SDK}" ${CYCLES_INSTALL_PATH}/source/kernel/device/hiprt/hiprt/impl)
++  delayed_install(${HIPRT_INCLUDE_DIR}        "${SRC_KERNEL_DEVICE_HIPRT_SDK_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/hiprt/hiprt)
++  delayed_install(${HIPRT_INCLUDE_DIR}        "${SRC_KERNEL_DEVICE_HIPRT_SDK}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/hiprt/hiprt/impl)
+ endif()
+diff --git a/src/kernel/device/metal/CMakeLists.txt b/src/kernel/device/metal/CMakeLists.txt
+index 0e65b138..20b09e9a 100644
+--- a/src/kernel/device/metal/CMakeLists.txt
++++ b/src/kernel/device/metal/CMakeLists.txt
+@@ -41,5 +41,5 @@ if(WITH_CYCLES_DEVICE_METAL)
+   add_dependencies(cycles_kernel cycles_kernel_metal)
+ endif()
+ 
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_METAL}" ${CYCLES_INSTALL_PATH}/source/kernel/device/metal)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_METAL_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/device/metal)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_METAL}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/metal)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_METAL_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/metal)
+diff --git a/src/kernel/device/optix/CMakeLists.txt b/src/kernel/device/optix/CMakeLists.txt
+index df4780ba..86ce0135 100644
+--- a/src/kernel/device/optix/CMakeLists.txt
++++ b/src/kernel/device/optix/CMakeLists.txt
+@@ -180,5 +180,5 @@ if(WITH_CYCLES_CUDA_BINARIES AND WITH_CYCLES_DEVICE_OPTIX)
+   add_dependencies(cycles_kernel cycles_kernel_optix)
+ endif()
+ 
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_OPTIX}" ${CYCLES_INSTALL_PATH}/source/kernel/device/optix)
+-delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_OPTIX_HEADERS}" ${CYCLES_INSTALL_PATH}/source/kernel/device/optix)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_OPTIX}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/optix)
++delayed_install(${CMAKE_CURRENT_SOURCE_DIR} "${SRC_KERNEL_DEVICE_OPTIX_HEADERS}" ${CYCLES_KERNEL_SOURCE_PATH}/kernel/device/optix)

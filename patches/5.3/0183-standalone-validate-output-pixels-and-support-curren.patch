@@ -1,0 +1,146 @@
+From 871f264566b42cc42640db25156a64afabee1c93 Mon Sep 17 00:00:00 2001
+From: BDE <dev@bde.run>
+Date: Tue, 17 Nov 2026 11:50:18 +0100
+Subject: [PATCH] standalone: validate output pixels and support current
+ open-source USD
+
+---
+ src/app/CMakeLists.txt        |  3 +++
+ src/app/cycles_standalone.cpp |  7 ++++++
+ src/app/image_info.cpp        | 42 +++++++++++++++++++++++++++++++++++
+ src/hydra/mtlx_expand.cpp     |  2 ++
+ src/hydra/plugin.cpp          |  2 ++
+ 5 files changed, 56 insertions(+)
+ create mode 100644 src/app/image_info.cpp
+
+diff --git a/src/app/CMakeLists.txt b/src/app/CMakeLists.txt
+index a04fd600..26fe3944 100644
+--- a/src/app/CMakeLists.txt
++++ b/src/app/CMakeLists.txt
+@@ -89,6 +89,9 @@ if(WITH_CYCLES_STANDALONE)
+   endif()
+ 
+   add_executable(cycles ${SRC} ${INC} ${INC_SYS})
++  add_executable(cycles_image_info image_info.cpp)
++  target_link_libraries(cycles_image_info PRIVATE bf::dependencies::openimageio)
++  install(TARGETS cycles_image_info DESTINATION ${app_install_dir})
+   unset(SRC)
+ 
+   target_link_libraries(cycles PRIVATE ${LIB})
+diff --git a/src/app/cycles_standalone.cpp b/src/app/cycles_standalone.cpp
+index 73b76c78..ab58978d 100644
+--- a/src/app/cycles_standalone.cpp
++++ b/src/app/cycles_standalone.cpp
+@@ -55,6 +55,7 @@ struct Options {
+   string camera_path;
+   string render_settings_path;
+   OIIOOutputDriver *output_driver = nullptr;
++  bool samples_override = false;
+ } options;
+ 
+ static void session_print(const string &str)
+@@ -121,6 +122,11 @@ static void scene_init()
+       fprintf(stderr, "Failed to read USD scene: %s\n", options.filepath.c_str());
+       exit(EXIT_FAILURE);
+     }
++    const int command_samples = options.session_params.samples;
++    options.session_params = options.session->params;
++    if (options.samples_override) {
++      options.session_params.samples = command_samples;
++    }
+   }
+   else
+ #endif
+@@ -440,6 +446,7 @@ static void options_parse(const int argc, const char **argv)
+       .help("Render in background, without user interface");
+   ap.arg("--quiet", &options.quiet).help("In background mode, don't print progress messages");
+   ap.arg("--samples %d:SAMPLES").help("Number of samples to render").action([&](auto argv) {
++    options.samples_override = true;
+     parse_int(argv, &options.session_params.samples);
+   });
+   ap.arg("--output %s:OUTPUT").help("File path to write output image").action([&](auto argv) {
+diff --git a/src/app/image_info.cpp b/src/app/image_info.cpp
+new file mode 100644
+index 00000000..a9183e50
+--- /dev/null
++++ b/src/app/image_info.cpp
+@@ -0,0 +1,42 @@
++/* SPDX-License-Identifier: Apache-2.0 */
++#include <OpenImageIO/imagebuf.h>
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <limits>
++
++int main(int argc, char **argv)
++{
++  if (argc != 2) {
++    fprintf(stderr, "Usage: cycles_image_info image.exr\n");
++    return 2;
++  }
++  OIIO::ImageBuf image(argv[1]);
++  if (!image.read(0, 0, true, OIIO::TypeDesc::FLOAT)) {
++    fprintf(stderr, "%s\n", image.geterror().c_str());
++    return 1;
++  }
++  const OIIO::ImageSpec &spec = image.spec();
++  double minimum = std::numeric_limits<double>::infinity();
++  double maximum = -minimum;
++  unsigned long long nonfinite = 0;
++  for (OIIO::ImageBuf::ConstIterator<float> pixel(image); !pixel.done(); ++pixel) {
++    for (int channel = 0; channel < spec.nchannels; ++channel) {
++      const double value = pixel[channel];
++      if (!std::isfinite(value)) {
++        ++nonfinite;
++      }
++      else {
++        minimum = std::min(minimum, value);
++        maximum = std::max(maximum, value);
++      }
++    }
++  }
++  if (!std::isfinite(minimum) || !std::isfinite(maximum)) {
++    return 1;
++  }
++  printf("{\"width\":%d,\"height\":%d,\"channels\":%d,\"nonfinite\":%llu,"
++         "\"min\":%.9g,\"max\":%.9g}\n",
++         spec.width, spec.height, spec.nchannels, nonfinite, minimum, maximum);
++  return nonfinite ? 1 : 0;
++}
+diff --git a/src/hydra/mtlx_expand.cpp b/src/hydra/mtlx_expand.cpp
+index 217327b8..080a6608 100644
+--- a/src/hydra/mtlx_expand.cpp
++++ b/src/hydra/mtlx_expand.cpp
+@@ -5,6 +5,7 @@
+ #include "hydra/mtlx_expand.h"
+ #include "hydra/mtlx_nodegraphs.h"
+ #include "util/log.h"
++#include "util/path.h"
+ 
+ #include <MaterialXCore/Document.h>
+ #include <MaterialXCore/Value.h>
+@@ -50,6 +51,7 @@ mx::DocumentPtr Library()
+   static const mx::DocumentPtr document = [] {
+     mx::DocumentPtr doc = mx::createDocument();
+     mx::FileSearchPath searchPath;
++    searchPath.append(mx::FilePath(CCL_NS::path_get("share/materialx")));
+     const std::string override = TfGetenv("CYCLES_MATERIALX_LIBRARIES");
+     if (!override.empty()) {
+       searchPath.append(mx::FilePath(override));
+diff --git a/src/hydra/plugin.cpp b/src/hydra/plugin.cpp
+index 6095c9ff..d1bc80ef 100644
+--- a/src/hydra/plugin.cpp
++++ b/src/hydra/plugin.cpp
+@@ -114,10 +114,12 @@ bool HdCyclesPlugin::IsSupported(HdRendererCreateArgs const & /*rendererCreateAr
+   return true;
+ }
+ #  endif
++#  if PXR_VERSION < 2608
+ bool HdCyclesPlugin::IsSupported(bool /*gpuEnabled*/) const
+ {
+   return true;
+ }
++#  endif
+ #endif
+ 
+ HdRenderDelegate *HdCyclesPlugin::CreateRenderDelegate()

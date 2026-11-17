@@ -1,0 +1,23 @@
+From 8c2041e7a9e36d12eba9212a6c4636fe6ef8564a Mon Sep 17 00:00:00 2001
+From: BDE <dev@bde.run>
+Date: Tue, 17 Nov 2026 11:55:15 +0100
+Subject: [PATCH] cmake: link the USD scene schemas used by the standalone
+ reader
+
+---
+ src/cmake/Modules/FindUSDHoudini.cmake | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/cmake/Modules/FindUSDHoudini.cmake b/src/cmake/Modules/FindUSDHoudini.cmake
+index ea7fcc7b..e355cf58 100644
+--- a/src/cmake/Modules/FindUSDHoudini.cmake
++++ b/src/cmake/Modules/FindUSDHoudini.cmake
+@@ -31,7 +31,7 @@ if(HOUDINI_ROOT AND EXISTS ${HOUDINI_ROOT})
+   string(REGEX MATCHALL "[0-9]+" HOUDINI_VERSION_MAJOR ${_houdini_version_major})
+ 
+   # USD
+-  set(USD_LIBRARIES hd hdsi geomUtil hgi hgiGL sdr gf arch garch plug tf trace vt work sdf cameraUtil hf pxOsd usd usdImaging usdGeom ar python)
++  set(USD_LIBRARIES hd hdsi geomUtil hgi hgiGL sdr gf arch garch plug tf trace vt work sdf cameraUtil hf pxOsd usd usdImaging usdGeom usdRender usdShade usdLux ar python)
+ 
+   foreach(lib ${USD_LIBRARIES})
+     find_library(_pxr_library NAMES pxr_${lib} PATHS ${_library_dir} NO_DEFAULT_PATH)

@@ -1,0 +1,79 @@
+From b1c8970a8168c161c17a7fd7e85541e01bb1a7be Mon Sep 17 00:00:00 2001
+From: BDE <dev@bde.run>
+Date: Tue, 17 Nov 2026 11:47:53 +0100
+Subject: [PATCH] cmake: link MaterialX on macOS and resolve packaged Hydra
+ dependencies
+
+---
+ src/cmake/external_libs.cmake | 22 ++++++++++++++--------
+ src/hydra/CMakeLists.txt      | 16 ++++++++++++++++
+ 2 files changed, 30 insertions(+), 8 deletions(-)
+
+diff --git a/src/cmake/external_libs.cmake b/src/cmake/external_libs.cmake
+index b75704e2..4202cc1b 100644
+--- a/src/cmake/external_libs.cmake
++++ b/src/cmake/external_libs.cmake
+@@ -682,15 +682,15 @@ if(WITH_USD AND NOT USD_OVERRIDE_MATERIALX)
+     # USD linking needs to be able to find MaterialX libraries.
+     link_directories(${MATERIALX_ROOT_DIR}/lib)
+ 
++    find_package(MaterialX REQUIRED CONFIG)
++    list(APPEND USD_LIBRARIES
++      MaterialXCore
++      MaterialXFormat
++      MaterialXRender
++      MaterialXGenGlsl
++      MaterialXGenMsl
++    )
+     if(UNIX AND NOT APPLE)
+-      find_package(MaterialX)
+-      list(APPEND USD_LIBRARIES
+-        MaterialXCore
+-        MaterialXFormat
+-        MaterialXRender
+-        MaterialXGenGlsl
+-        MaterialXGenMsl
+-      )
+       # USD is built with Vulkan support, link the library.
+       find_package(Vulkan)
+       if(VULKAN_FOUND)
+@@ -706,6 +706,12 @@ if(WITH_USD AND NOT USD_OVERRIDE_MATERIALX)
+   endif()
+ endif()
+ 
++# Standalone MaterialX graph expansion must not depend on an artist's Houdini
++# installation or a directory on the build machine.
++if(WITH_USD AND NOT HOUDINI_FOUND AND EXISTS "${MATERIALX_ROOT_DIR}/libraries")
++  install(DIRECTORY "${MATERIALX_ROOT_DIR}/libraries" DESTINATION share/materialx)
++endif()
++
+ ###########################################################################
+ # ZSTD
+ ###########################################################################
+diff --git a/src/hydra/CMakeLists.txt b/src/hydra/CMakeLists.txt
+index fb33ed21..d13bf778 100644
+--- a/src/hydra/CMakeLists.txt
++++ b/src/hydra/CMakeLists.txt
+@@ -157,6 +157,22 @@ if(WITH_CYCLES_HYDRA_RENDER_DELEGATE)
+     cycles_hydra
+   )
+ 
++  if(APPLE)
++    set(_cycles_loader "@loader_path")
++  elseif(UNIX)
++    set(_cycles_loader "$ORIGIN")
++  endif()
++  if(DEFINED _cycles_loader)
++    if(HOUDINI_FOUND)
++      set_property(TARGET ${HdCyclesPluginName} APPEND PROPERTY
++        INSTALL_RPATH "${_cycles_loader}/../../lib")
++    else()
++      set_property(TARGET ${HdCyclesPluginName} APPEND PROPERTY
++        INSTALL_RPATH "${_cycles_loader}/../lib")
++    endif()
++    unset(_cycles_loader)
++  endif()
++
+   if(APPLE)
+     set_property(
+       TARGET

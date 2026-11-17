@@ -21,7 +21,10 @@ import argparse
 import os
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
+from bootstrap import library_platform, verify_payload_files
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -61,14 +64,47 @@ def scan(dist):
     return bad
 
 
+def relocate_linux_delegate(plugin, houdini_runtime=""):
+    """Fix file-installed delegates, for which CMake skips install RPATH edits."""
+    if not sys.platform.startswith("linux"):
+        return
+    delegate = os.path.join(plugin, "houdini", "dso", "usd", "hdCycles.so")
+    dynamic = subprocess.check_output(["readelf", "-d", delegate], text=True)
+    match = re.search(r"\((?:RPATH|RUNPATH)\).*?\[([^\]]+)\]", dynamic)
+    if not match:
+        raise ValueError("Missing native delegate library path: " + delegate)
+    relative = "$ORIGIN/../../lib"
+    if houdini_runtime:
+        if not os.path.isabs(houdini_runtime):
+            raise ValueError("The Houdini runtime prefix must be absolute")
+        relative += ":" + houdini_runtime + "/dsolib:" + houdini_runtime + "/python/lib"
+    if match.group(1) == relative:
+        return
+    with tempfile.TemporaryDirectory(prefix="cycles-rpath-") as temporary:
+        script = os.path.join(temporary, "relocate.cmake")
+        with open(script, "w") as stream:
+            stream.write("file(RPATH_CHANGE FILE [=[" + delegate + "]=] OLD_RPATH [=[" +
+                         match.group(1) + "]=] NEW_RPATH [=[" + relative + "]=])\n")
+        subprocess.run(["cmake", "-P", script], check=True)
+    relocated = subprocess.check_output(["readelf", "-d", delegate], text=True)
+    if not re.search(r"\((?:RPATH|RUNPATH)\).*?\[" + re.escape(relative) + r"\]", relocated):
+        raise ValueError("Delegate relocation failed: " + delegate)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--version", choices=sorted(VERSIONS), default="5.3")
     p.add_argument("--zip", action="store_true", help="also write dist/<name>.zip")
+    p.add_argument("--install-dir", help="native SDK installation prefix")
+    p.add_argument("--name", help="platform/SDK-specific archive name")
+    p.add_argument("--houdini-runtime", default="",
+                   help="Linux target's exact installed Houdini prefix (for SDK library lookup)")
     args = p.parse_args()
+    if sys.platform.startswith("linux") and not args.houdini_runtime:
+        p.error("Linux clients need --houdini-runtime with the target's exact SDK prefix")
 
     cfg = VERSIONS[args.version]
-    install = os.path.join(ROOT, cfg["install"])
+    install = os.path.abspath(args.install_dir or os.path.join(ROOT, cfg["install"]))
     houdini = os.path.join(install, "houdini")
     template = os.path.join(ROOT, "external", cfg["dir"], "src", "hydra",
                             "resources", "cycles.json.in")
@@ -81,21 +117,29 @@ def main():
     if b"@" in package or ABSOLUTE.search(package):
         sys.exit("the package template still holds a build path: " + template)
 
-    name = "CyclesForHoudini-" + args.version
+    name = args.name or "CyclesForHoudini-" + args.version
+    if name != os.path.basename(name) or name in (".", ".."):
+        sys.exit("--name must be a single directory name")
     dist = os.path.join(ROOT, "dist", name)
     if os.path.exists(dist):
         shutil.rmtree(dist)
     plugin = os.path.join(dist, PLUGIN_DIR)
 
     copy_tree(houdini, os.path.join(plugin, "houdini"))
+    relocate_linux_delegate(plugin, args.houdini_runtime)
     licence = os.path.join(install, "license")
     if os.path.isdir(licence):
         copy_tree(licence, os.path.join(plugin, "licenses"))
+    dependencies = os.path.join(ROOT, "external", cfg["dir"], "lib", library_platform(), "deps.md")
+    if os.path.isfile(dependencies):
+        os.makedirs(os.path.join(plugin, "licenses"), exist_ok=True)
+        shutil.copy2(dependencies, os.path.join(plugin, "licenses", "Blender-dependencies.md"))
     for f in ("LICENSE", "NOTICE"):
         shutil.copy2(os.path.join(ROOT, f), os.path.join(plugin, f))
     with open(os.path.join(dist, "cycles.json"), "wb") as f:
         f.write(package)
 
+    verify_payload_files(dist)
     bad = scan(dist)
     if bad:
         print("text files that still name a drive letter:")
