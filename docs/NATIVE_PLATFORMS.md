@@ -27,13 +27,16 @@ HOUDINI_PATH='/tmp/cycles-install/h22/houdini:&' \
 PXR_PLUGINPATH_NAME=/tmp/cycles-install/h22/houdini/dso/usd_plugins \
 CYCLES_INSTALL_DIR=/tmp/cycles-install/h22 hython tools/build_cycles_vops.py
 python3 tools/make_dist.py --install-dir /tmp/cycles-install/h22 \
+  --houdini-runtime /Applications/Houdini/Houdini22.0.466 \
   --name CyclesForHoudini-5.3-h22-macos-arm64 --zip
 ```
 
-For a Linux client, also pass `--houdini-runtime /opt/hfs22.0.466` to
-`make_dist.py`, using the target machine's exact Houdini installation prefix.
-Packaging replaces the build machine's library paths with the plugin's own
-relative libraries and that SDK's `dsolib`/Python libraries. It never bundles
+For a Linux client, pass `--houdini-runtime /opt/hfs22.0.466`, using the
+target machine's exact Houdini installation prefix. Packaging replaces build
+library paths with the plugin's relative libraries and the target SDK's
+libraries. On macOS it rewrites Mach-O RPATHs and refreshes the ad-hoc
+signature; on Linux it replaces the ELF RPATH. Native loader fixtures prove
+that the packaged plugin still loads after original dependencies are removed. It never bundles
 SideFX libraries. Relocate the finished package and test fresh hython/Husk
 processes against that exact installed SDK.
 

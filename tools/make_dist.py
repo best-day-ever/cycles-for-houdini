@@ -91,6 +91,26 @@ def relocate_linux_delegate(plugin, houdini_runtime=""):
         raise ValueError("Delegate relocation failed: " + delegate)
 
 
+def relocate_macos_delegate(plugin, houdini_runtime=""):
+    if sys.platform != "darwin":
+        return
+    delegate = os.path.join(plugin, "houdini", "dso", "usd", "hdCycles.dylib")
+    dynamic = subprocess.check_output(["otool", "-l", delegate], text=True)
+    paths = re.findall(r"\bcmd LC_RPATH\s+cmdsize \d+\s+path (.*?) \(offset \d+\)", dynamic)
+    for path in paths:
+        subprocess.run(["install_name_tool", "-delete_rpath", path, delegate], check=True)
+    paths = ["@loader_path/../../lib"]
+    if houdini_runtime:
+        if not os.path.isabs(houdini_runtime):
+            raise ValueError("The Houdini runtime prefix must be absolute")
+        paths += [houdini_runtime + "/Frameworks/Houdini.framework/Libraries",
+                  houdini_runtime + "/Frameworks/Python.framework/Versions/Current/lib"]
+    for path in paths:
+        subprocess.run(["install_name_tool", "-add_rpath", path, delegate], check=True)
+    subprocess.run(["codesign", "--force", "--sign", "-", delegate], check=True)
+    subprocess.run(["codesign", "--verify", "--strict", delegate], check=True)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--version", choices=sorted(VERSIONS), default="5.3")
@@ -98,7 +118,7 @@ def main():
     p.add_argument("--install-dir", help="native SDK installation prefix")
     p.add_argument("--name", help="platform/SDK-specific archive name")
     p.add_argument("--houdini-runtime", default="",
-                   help="Linux target's exact installed Houdini prefix (for SDK library lookup)")
+                   help="Target's exact installed Houdini prefix (for SDK library lookup)")
     args = p.parse_args()
     if sys.platform.startswith("linux") and not args.houdini_runtime:
         p.error("Linux clients need --houdini-runtime with the target's exact SDK prefix")
@@ -127,6 +147,7 @@ def main():
 
     copy_tree(houdini, os.path.join(plugin, "houdini"))
     relocate_linux_delegate(plugin, args.houdini_runtime)
+    relocate_macos_delegate(plugin, args.houdini_runtime)
     licence = os.path.join(install, "license")
     if os.path.isdir(licence):
         copy_tree(licence, os.path.join(plugin, "licenses"))
