@@ -167,7 +167,7 @@ def prepare_usd_cxx20_compat(src, build, target, houdini=""):
     with open(os.path.join(build, "usd-cxx20-compat", "identity.json"), "w") as stream:
         json.dump({"source_sha256": digest,
                    "overlay_sha256": hashlib.sha256(corrected).hexdigest()}, stream, indent=2)
-    return ["-DCMAKE_PROJECT_INCLUDE=" + os.path.join(HERE, "usd_cxx20_compat.cmake"),
+    return ["-DCMAKE_PROJECT_INCLUDE=" + os.path.join(HERE, "native_linux.cmake"),
             "-DCYCLES_USD_COMPAT_INCLUDE=" + include]
 
 
@@ -213,7 +213,8 @@ def configure(src, cfg, houdini, optix, arch, osl, split=True,
         raise ValueError("The USD compatibility overlay needs CMAKE_PROJECT_INCLUDE; combine custom hooks explicitly")
     if target.startswith("linux_") and not compatibility:
         # Disable an overlay cached by a previous configuration of this directory.
-        compatibility = ["-DCYCLES_USD_COMPAT_INCLUDE="]
+        compatibility = ["-DCMAKE_PROJECT_INCLUDE=" + os.path.join(HERE, "native_linux.cmake"),
+                         "-DCYCLES_USD_COMPAT_INCLUDE="]
     run(args + compatibility + list(extra))
     return build
 

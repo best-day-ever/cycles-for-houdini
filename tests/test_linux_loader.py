@@ -1,0 +1,49 @@
+"""Exercise the ELF loader contract that previously crashed OIDN CUDA probing."""
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@unittest.skipUnless(sys.platform.startswith('linux') and shutil.which('cmake') and shutil.which('cc'),
+                     'native ELF compiler fixture')
+class LinuxLoaderTests(unittest.TestCase):
+    def test_driver_function_is_not_interposed_by_the_loader_pointer_table(self):
+        with tempfile.TemporaryDirectory(prefix='cycles-loader-') as temporary:
+            root = Path(temporary)
+            (root / 'cuew.c').write_text('static int stub(int x) { return -1; }\n'
+                                        'int (*cuInit)(int) = stub;\n')
+            (root / 'driver.c').write_text('int cuInit(int x) { return 42; }\n')
+            (root / 'module.c').write_text('extern int cuInit(int);\nint probe(void) { return cuInit(0); }\n')
+            (root / 'main.c').write_text('''#include <dlfcn.h>
+extern int (*cuInit)(int);
+int main(int argc, char **argv) {
+  if (!cuInit) return 2;
+  void *module = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+  if (!module) return 3;
+  int (*probe)(void) = (int (*)(void))dlsym(module, "probe");
+  return !probe || probe() != 42;
+}
+''')
+            (root / 'CMakeLists.txt').write_text('''cmake_minimum_required(VERSION 3.25)
+project(LoaderRegression C)
+add_library(extern_cuew STATIC cuew.c)
+add_library(driver SHARED driver.c)
+add_library(module SHARED module.c)
+target_link_libraries(module PRIVATE driver)
+add_executable(probe main.c)
+set_target_properties(probe PROPERTIES ENABLE_EXPORTS ON)
+target_link_libraries(probe PRIVATE extern_cuew dl)
+''')
+            build = root / 'build'
+            subprocess.run(['cmake', '-S', str(root), '-B', str(build),
+                '-DCMAKE_PROJECT_INCLUDE=' + str(ROOT / 'tools/native_linux.cmake')],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            subprocess.run(['cmake', '--build', str(build), '--parallel', '1'],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            subprocess.run([str(build / 'probe'), str(build / 'libmodule.so')], check=True)
