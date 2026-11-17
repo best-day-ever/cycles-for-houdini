@@ -23,6 +23,8 @@ python3 tools/bootstrap.py --no-osl --jobs 2 --houdini "$HOUDINI_ROOT" \
   --build-dir /tmp/cycles-build/h22 --install-dir /tmp/cycles-install/h22
 
 # Run with the exact Houdini's hython and the new plugin registered.
+HOUDINI_PATH='/tmp/cycles-install/h22/houdini:&' \
+PXR_PLUGINPATH_NAME=/tmp/cycles-install/h22/houdini/dso/usd_plugins \
 CYCLES_INSTALL_DIR=/tmp/cycles-install/h22 hython tools/build_cycles_vops.py
 python3 tools/make_dist.py --install-dir /tmp/cycles-install/h22 \
   --name CyclesForHoudini-5.3-h22-macos-arm64 --zip
@@ -107,7 +109,11 @@ The initial native Apple Silicon acceptance rendered the same H22.0.466-exported
 USD on CPU and the M2 Ultra's 76-core Metal GPU. Both 96×64 two-frame sequences
 contained finite, nonblack pixels and changed with USD time. Mean absolute
 CPU/Metal pixel difference was 2.1×10⁻⁸; frame-to-frame change was 0.08543.
-Native H22 plugin discovery, generation of102 VOPs, Solaris authoring and
-two-frame Metal Husk rendering also pass (image change0.08540).
-Expanded NVIDIA, native-Houdini and relocated-package acceptance is recorded
-with each release; compiled kernels alone do not qualify a hardware generation.
+Native H22 plugin discovery, generation of 102 VOPs, Solaris authoring and
+two-frame Metal Husk rendering also pass (image change 0.08540).
+The packaged runtime also renders after relocation on an M2 Ultra and an M4
+Max (40-core GPU). Both animated sequences have finite, nonblack pixels;
+frame-to-frame change is 0.08540 and their mean pixel difference is 1.7×10⁻⁸.
+The relocated H22 package passes the same two-frame Metal Husk render.
+Expanded NVIDIA acceptance is recorded with each release; compiled kernels
+alone do not qualify a hardware generation.

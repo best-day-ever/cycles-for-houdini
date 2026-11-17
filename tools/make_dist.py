@@ -22,6 +22,7 @@ import os
 import re
 import shutil
 import sys
+from bootstrap import library_platform
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -95,6 +96,10 @@ def main():
     licence = os.path.join(install, "license")
     if os.path.isdir(licence):
         copy_tree(licence, os.path.join(plugin, "licenses"))
+    dependencies = os.path.join(ROOT, "external", cfg["dir"], "lib", library_platform(), "deps.md")
+    if os.path.isfile(dependencies):
+        os.makedirs(os.path.join(plugin, "licenses"), exist_ok=True)
+        shutil.copy2(dependencies, os.path.join(plugin, "licenses", "Blender-dependencies.md"))
     for f in ("LICENSE", "NOTICE"):
         shutil.copy2(os.path.join(ROOT, f), os.path.join(plugin, f))
     with open(os.path.join(dist, "cycles.json"), "wb") as f:
