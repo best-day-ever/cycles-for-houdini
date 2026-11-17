@@ -21,7 +21,9 @@ import argparse
 import os
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
 from bootstrap import library_platform, verify_payload_files
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -62,6 +64,29 @@ def scan(dist):
     return bad
 
 
+def relocate_linux_delegate(plugin):
+    """Fix file-installed delegates, for which CMake skips install RPATH edits."""
+    if not sys.platform.startswith("linux"):
+        return
+    delegate = os.path.join(plugin, "houdini", "dso", "usd", "hdCycles.so")
+    dynamic = subprocess.check_output(["readelf", "-d", delegate], text=True)
+    match = re.search(r"\((?:RPATH|RUNPATH)\).*?\[([^\]]+)\]", dynamic)
+    if not match:
+        raise ValueError("Missing native delegate library path: " + delegate)
+    relative = "$ORIGIN/../../lib"
+    if match.group(1) == relative:
+        return
+    with tempfile.TemporaryDirectory(prefix="cycles-rpath-") as temporary:
+        script = os.path.join(temporary, "relocate.cmake")
+        with open(script, "w") as stream:
+            stream.write("file(RPATH_CHANGE FILE [=[" + delegate + "]=] OLD_RPATH [=[" +
+                         match.group(1) + "]=] NEW_RPATH [=[" + relative + "]=])\n")
+        subprocess.run(["cmake", "-P", script], check=True)
+    relocated = subprocess.check_output(["readelf", "-d", delegate], text=True)
+    if not re.search(r"\((?:RPATH|RUNPATH)\).*?\[" + re.escape(relative) + r"\]", relocated):
+        raise ValueError("Delegate relocation failed: " + delegate)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--version", choices=sorted(VERSIONS), default="5.3")
@@ -93,6 +118,7 @@ def main():
     plugin = os.path.join(dist, PLUGIN_DIR)
 
     copy_tree(houdini, os.path.join(plugin, "houdini"))
+    relocate_linux_delegate(plugin)
     licence = os.path.join(install, "license")
     if os.path.isdir(licence):
         copy_tree(licence, os.path.join(plugin, "licenses"))

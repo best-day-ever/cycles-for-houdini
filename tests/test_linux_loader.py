@@ -8,6 +8,8 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+from make_dist import relocate_linux_delegate
 
 
 @unittest.skipUnless(sys.platform.startswith('linux') and shutil.which('cmake') and shutil.which('cc'),
@@ -47,3 +49,14 @@ target_link_libraries(probe PRIVATE extern_cuew dl)
             subprocess.run(['cmake', '--build', str(build), '--parallel', '1'],
                 check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             subprocess.run([str(build / 'probe'), str(build / 'libmodule.so')], check=True)
+            plugin = root / 'relocated'
+            delegate_dir = plugin / 'houdini/dso/usd'
+            delegate_dir.mkdir(parents=True)
+            library_dir = plugin / 'houdini/lib'
+            library_dir.mkdir()
+            shutil.copy2(build / 'libmodule.so', delegate_dir / 'hdCycles.so')
+            shutil.copy2(build / 'libdriver.so', library_dir)
+            relocate_linux_delegate(str(plugin))
+            # Remove the original dependency: only the relocated relative path works.
+            (build / 'libdriver.so').unlink()
+            subprocess.run([str(build / 'probe'), str(delegate_dir / 'hdCycles.so')], check=True)
