@@ -60,6 +60,8 @@ def validate_image(path, runtime, env):
 def render_frames(args, runtime):
     if args.frame_end < args.frame_start or args.frame_step < 1 or args.threads < 0 or args.samples < 0:
         raise ValueError('Invalid frame range, samples or thread count')
+    if args.resolution and any(value < 1 for value in args.resolution):
+        raise ValueError('Resolution must have positive width and height')
     if args.frame_start != args.frame_end and not FRAME_TOKEN.search(args.output):
         raise ValueError('An image sequence requires ####, $F4 or %04d in its output path')
     if Path(args.output).suffix.lower() != '.exr':
@@ -67,7 +69,8 @@ def render_frames(args, runtime):
     env = dict(os.environ)
     # No SideFX library path, Python module or renderer plugin enters this process.
     for key in ('HFS', 'HH', 'PYTHONHOME', 'PYTHONPATH', 'PXR_PLUGINPATH_NAME',
-                'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH'):
+                'LD_LIBRARY_PATH', 'LD_PRELOAD', 'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH',
+                'DYLD_INSERT_LIBRARIES', 'DYLD_FALLBACK_LIBRARY_PATH'):
         env.pop(key, None)
     env['CYCLES_MATERIALX_LIBRARIES'] = str(runtime / 'share/materialx')
     for frame in range(args.frame_start, args.frame_end + 1, args.frame_step):

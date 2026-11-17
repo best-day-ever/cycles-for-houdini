@@ -56,7 +56,7 @@ def author(stage):
     var.GetPrim().CreateAttribute('driver:parameters:aov:husk:format', Sdf.ValueTypeNames.Token).Set('color4f')
     product = UsdRender.Product.Define(stage, '/Render/product')
     product.CreateProductTypeAttr('raster')
-    product.CreateProductNameAttr('beauty.exr')
+    product.CreateProductNameAttr('beauty.$F4.exr')
     product.CreateOrderedVarsRel().SetTargets([var.GetPath()])
     settings.CreateProductsRel().SetTargets([product.GetPath()])
 

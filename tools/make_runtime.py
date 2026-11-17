@@ -43,6 +43,7 @@ def main():
     for name_notice in ('LICENSE', 'NOTICE'):
         shutil.copy2(ROOT / name_notice, notices / name_notice)
     dependencies = args.source_dir / 'lib' / library_platform()
+    shutil.copy2(dependencies / 'deps.md', notices / 'Blender-dependencies.md')
     for package in dependencies.iterdir():
         if package.is_dir():
             for directory in ('license', 'licenses'):

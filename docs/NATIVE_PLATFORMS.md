@@ -37,6 +37,10 @@ configure log for every requested architecture; an older toolkit may skip an
 unsupported architecture. The build defaults to two jobs, serial CUDA
 architectures and bounded nvcc split compilation.
 
+Choose an OptiX SDK compatible with the installed driver. For an R580 driver,
+use OptiX9.0 (R570 or newer); OptiX9.1 requires R590 or newer. This lets the
+native Ada/Blackwell build retain the workstation's existing driver.
+
 Existing source caches require a completed patch identity receipt. When the
 patch series changes, prepare a new source cache with `--source-dir`; preserve
 the old cache for its existing build. Dependencies stay pinned by the Cycles
@@ -100,8 +104,10 @@ enables its graphics context; an SSH-only macOS session may fail creating that
 context. The Cycles output driver supports headless GPU rendering.
 
 The initial native Apple Silicon acceptance rendered the same H22.0.466-exported
-USD on CPU and the M2 Ultra's76-core Metal GPU. Both96×64 two-frame sequences
+USD on CPU and the M2 Ultra's 76-core Metal GPU. Both 96×64 two-frame sequences
 contained finite, nonblack pixels and changed with USD time. Mean absolute
-CPU/Metal pixel difference was2.1×10⁻⁸; frame-to-frame change was0.08543.
+CPU/Metal pixel difference was 2.1×10⁻⁸; frame-to-frame change was 0.08543.
+Native H22 plugin discovery, generation of102 VOPs, Solaris authoring and
+two-frame Metal Husk rendering also pass (image change0.08540).
 Expanded NVIDIA, native-Houdini and relocated-package acceptance is recorded
 with each release; compiled kernels alone do not qualify a hardware generation.

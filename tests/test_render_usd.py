@@ -82,6 +82,23 @@ class RenderTests(unittest.TestCase):
                 renderer.render_frames(args, root)
             self.assertFalse((root / 'request.json').exists())
 
+    def test_input_file_sequences_select_the_current_frame(self):
+        with self.runtime() as (root, args):
+            for frame in (1, 2):
+                (root / ('scene.%04d.usda' % frame)).write_text('#usda 1.0')
+            args.scene = str(root / 'scene.$F4.usda')
+            with contextlib.redirect_stdout(io.StringIO()):
+                renderer.render_frames(args, root)
+            request = json.loads((root / 'request.json').read_text())
+            self.assertEqual(Path(request['args'][-1]), (root / 'scene.0002.usda').resolve())
+
+    def test_invalid_resolution_stops_before_starting_a_renderer(self):
+        with self.runtime() as (root, args):
+            args.resolution = [-1, 64]
+            with self.assertRaises(ValueError):
+                renderer.render_frames(args, root)
+            self.assertFalse((root / 'request.json').exists())
+
 
 if __name__ == '__main__':
     unittest.main()
