@@ -2,7 +2,12 @@
 
 This BDE fork adds native Apple Silicon/Metal builds, native Linux builds and
 an independent USD sequence renderer. See [native platforms and standalone USD](docs/NATIVE_PLATFORMS.md)
-for build commands, the qualification procedure and current limits.
+for build commands, qualification evidence and current limits.
+
+Native image tests pass on RTX4090 and RTX PRO6000 Blackwell through CUDA/OptiX,
+and on M2 Ultra/M4 Max through Metal. Exact H22.0.466 Solaris export, standalone
+USD sequences and normal farm rendering pass. The signed Mac Houdini client
+also renders with its original builder dependency cache unavailable.
 
 Blender's [Cycles](https://projects.blender.org/blender/cycles) as a Hydra render
 delegate for **Houdini 22 / Solaris**, with its shading nodes exposed natively in
@@ -110,7 +115,7 @@ rebuild, and so will the Python 3.11 flavour.
 | | |
 |---|---|
 | Houdini | 22.0 series, built against **22.0.368** (USD 26.05, Python 3.13, MaterialX 1.39.5) |
-| OS | Windows 11 upstream; native Apple Silicon; native Linux under qualification |
+| OS | Windows 11 upstream; qualified native Apple Silicon and Rocky9.7 Linux |
 | GPU | CUDA 12.9 + OptiX SDK, or CPU only. Kernels for every NVIDIA generation since Maxwell (GTX 9xx) up to RTX 50xx, plus a PTX fallback |
 | Also | CMake 3.28+, git, git-lfs |
 
@@ -218,7 +223,7 @@ The ones a user meets first:
   background); light filters are not supported.
 - Implicit surfaces carry no UVs.
 
-- Apple Silicon Metal now has a native build and real two-frame standalone acceptance on M2 Ultra. NVIDIA generations beyond the upstream RTX30 hardware test remain qualification gates; built cubins alone do not prove hardware rendering. AMD HIP and Intel oneAPI are outside the initial native build qualification. See [native-platform acceptance](docs/NATIVE_PLATFORMS.md).
+- Native Metal images pass on M2 Ultra and M4 Max. Native OptiX and CUDA images pass on RTX4090 and RTX PRO6000 Blackwell. Exact H22 authoring/Husk and independent USD sequences pass; other hardware still requires actual image qualification. AMD HIP and Intel oneAPI are outside the initial native build qualification. See [native-platform acceptance](docs/NATIVE_PLATFORMS.md).
 
 ## Credits
 
