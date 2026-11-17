@@ -22,7 +22,7 @@ import os
 import re
 import shutil
 import sys
-from bootstrap import library_platform
+from bootstrap import library_platform, verify_payload_files
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -105,6 +105,7 @@ def main():
     with open(os.path.join(dist, "cycles.json"), "wb") as f:
         f.write(package)
 
+    verify_payload_files(dist)
     bad = scan(dist)
     if bad:
         print("text files that still name a drive letter:")

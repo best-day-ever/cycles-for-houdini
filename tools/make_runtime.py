@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import tarfile
 
-from bootstrap import VERSIONS, library_platform, patch_identity
+from bootstrap import VERSIONS, library_platform, patch_identity, verify_payload_files
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +54,7 @@ def main():
                     patch_sha256=patch_identity('5.3'), platform=platform.system(),
                     architecture=platform.machine(), standalone=True)
     (staging / 'release.json').write_text(json.dumps(metadata, indent=2) + '\n')
+    verify_payload_files(staging)
     archive = args.output_dir / (name + '.tar.gz')
     # The archive unpacks directly into an immutable, administrator-selected prefix.
     with tarfile.open(archive, 'w:gz', compresslevel=1) as output:

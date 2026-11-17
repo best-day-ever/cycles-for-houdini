@@ -39,6 +39,11 @@ configure log for every requested architecture; an older toolkit may skip an
 unsupported architecture. The build defaults to two jobs, serial CUDA
 architectures and bounded nvcc split compilation.
 
+The pinned denoiser/Embree dependencies also require the SYCL runtime libraries
+when the Cycles oneAPI backend is disabled. Bootstrap fetches those runtime
+DSOs without downloading the oneAPI compiler. Both packagers reject unresolved
+Git LFS pointers instead of publishing incomplete libraries.
+
 The pinned Linux USD26.08 header has a constructor template-id rejected by
 GCC's C++20 mode. Bootstrap supplies a checksum-guarded header overlay with the
 upstream-corrected spelling, without modifying the dependency checkout or its

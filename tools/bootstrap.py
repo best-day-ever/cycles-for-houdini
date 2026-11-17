@@ -68,6 +68,16 @@ def patch_identity(version):
     return digest.hexdigest()
 
 
+def verify_payload_files(root):
+    """A release must contain dependency bytes, never Git LFS pointer files."""
+    for base, _, files in os.walk(root):
+        for name in files:
+            path = os.path.join(base, name)
+            with open(path, "rb") as stream:
+                if stream.read(64).startswith(b"version https://git-lfs.github.com/spec/v1\n"):
+                    raise ValueError("Unresolved Git LFS dependency in release: " + path)
+
+
 def run(cmd, cwd=None, env=None):
     shown = cmd if len(cmd) < 20 else cmd[:4] + ["... (%d arguments)" % len(cmd)]
     print("  $ " + " ".join(shown), flush=True)
@@ -100,6 +110,12 @@ def prepare_libraries(src, target, osl=False):
     run(["git", "lfs", "pull", "--include=", "--exclude=" +
          ("dpcpp/**" if osl else "dpcpp/**,llvm/**,osl/**")],
         cwd=os.path.join(src, name))
+    if not target.startswith("macos_"):
+        # Blender's OIDN/Embree libraries link the SYCL runtime even when the
+        # Cycles oneAPI backend is disabled. Fetch runtime DSOs, not its compiler.
+        run(["git", "lfs", "pull", "--include=dpcpp/lib/*.so*,dpcpp/bin/sycl*.dll,"
+             "dpcpp/bin/ur_*.dll,dpcpp/bin/pi_*.dll", "--exclude="],
+            cwd=os.path.join(src, name))
 
 
 def apply_patches(src, version):

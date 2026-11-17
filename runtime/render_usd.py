@@ -69,6 +69,7 @@ def render_frames(args, runtime):
     env = dict(os.environ)
     # No SideFX library path, Python module or renderer plugin enters this process.
     for key in ('HFS', 'HH', 'PYTHONHOME', 'PYTHONPATH', 'PXR_PLUGINPATH_NAME',
+                'CYCLES_ROOT', 'CYCLES_KERNEL_PATH', 'CYCLES_SHADER_PATH',
                 'LD_LIBRARY_PATH', 'LD_PRELOAD', 'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH',
                 'DYLD_INSERT_LIBRARIES', 'DYLD_FALLBACK_LIBRARY_PATH'):
         env.pop(key, None)

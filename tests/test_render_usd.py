@@ -32,7 +32,7 @@ class RenderTests(unittest.TestCase):
             binary.write_text('#!' + sys.executable + '\n' +
                 'import sys,pathlib,json,os\na=sys.argv\n' +
                 "pathlib.Path(a[a.index('--output')+1]).write_bytes(" + repr(pixels) + ')\n' +
-                "pathlib.Path(__file__).with_name('request.json').write_text(json.dumps(dict(args=a,hfs=os.environ.get('HFS'))))\n" +
+                "pathlib.Path(__file__).with_name('request.json').write_text(json.dumps(dict(args=a,env={k:os.environ.get(k) for k in ('HFS','CYCLES_ROOT','CYCLES_KERNEL_PATH','CYCLES_SHADER_PATH','CYCLES_MATERIALX_LIBRARIES')})))\n" +
                 'sys.exit(' + str(result) + ')\n')
             binary.chmod(0o755)
             inspector = root / 'cycles_image_info'
@@ -49,14 +49,18 @@ class RenderTests(unittest.TestCase):
             yield root, args
 
     def test_sequence_publishes_complete_images_and_keeps_literal_paths(self):
-        with self.runtime() as (root, args), mock.patch.dict(os.environ, HFS='/a/sidefx/sdk'):
+        with self.runtime() as (root, args), mock.patch.dict(os.environ,
+                HFS='/a/sidefx/sdk', CYCLES_ROOT='/another/plugin',
+                CYCLES_KERNEL_PATH='/another/kernel', CYCLES_SHADER_PATH='/another/shader'):
             with contextlib.redirect_stdout(io.StringIO()):
                 renderer.render_frames(args, root)
             self.assertEqual((root / 'out.0001.exr').read_bytes(), b'valid')
             self.assertEqual((root / 'out.0002.exr').read_bytes(), b'valid')
             request = json.loads((root / 'request.json').read_text())
             self.assertEqual(Path(request['args'][-1]), Path(args.scene).resolve())
-            self.assertIsNone(request['hfs'])
+            for key in ('HFS', 'CYCLES_ROOT', 'CYCLES_KERNEL_PATH', 'CYCLES_SHADER_PATH'):
+                self.assertIsNone(request['env'][key])
+            self.assertEqual(request['env']['CYCLES_MATERIALX_LIBRARIES'], str(root / 'share/materialx'))
             self.assertFalse(list(root.glob('.*.cycles-*')))
 
     def test_failed_render_preserves_previous_output_and_removes_partial(self):
