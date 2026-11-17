@@ -145,3 +145,8 @@ generates all102 VOPs, exports the LOP stage and renders through Blackwell
 OptiX Husk. Decoded pixels preserve the red-to-green native material animation
 and blue MaterialX geometry. Maximum mean CPU/GPU difference is3.9×10⁻⁸.
 Compiled kernels alone do not qualify another hardware generation.
+
+The final signed Mac H22 client also passes fresh plugin/shader discovery and
+two-frame Metal Husk rendering while its original Blender dependency cache is
+renamed out of reach. Both ELF and Mach-O regression fixtures remove original
+libraries before loading the packaged delegate.
