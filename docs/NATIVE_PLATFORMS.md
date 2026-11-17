@@ -136,5 +136,9 @@ The packaged runtime also renders after relocation on an M2 Ultra and an M4
 Max (40-core GPU). Both animated sequences have finite, nonblack pixels;
 frame-to-frame change is 0.08540 and their mean pixel difference is 1.7×10⁻⁸.
 The relocated H22 package passes the same two-frame Metal Husk render.
-Expanded NVIDIA acceptance is recorded with each release; compiled kernels
-alone do not qualify a hardware generation.
+Native Linux acceptance now includes an RTX4090 and RTX PRO6000 Blackwell:
+both render the two-frame Houdini export through OptiX and CUDA. H22.0.466 also
+generates all102 VOPs, exports the LOP stage and renders through Blackwell
+OptiX Husk. Decoded pixels preserve the red-to-green native material animation
+and blue MaterialX geometry. Maximum mean CPU/GPU difference is3.9×10⁻⁸.
+Compiled kernels alone do not qualify another hardware generation.
