@@ -1,0 +1,61 @@
+From 2cc2c9237b3a3e1f46e488a453da9d3f32c67f79 Mon Sep 17 00:00:00 2001
+From: BDE <dev@bde.run>
+Date: Tue, 17 Nov 2026 11:58:41 +0100
+Subject: [PATCH] metal: install custom SVM headers and avoid duplicate kernel
+ member declarations
+
+---
+ src/hydra/file_reader.cpp          | 5 ++++-
+ src/kernel/CMakeLists.txt          | 2 ++
+ src/kernel/geom/gsplat_intersect.h | 2 ++
+ 3 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/hydra/file_reader.cpp b/src/hydra/file_reader.cpp
+index 7db9c391..7c0d4917 100644
+--- a/src/hydra/file_reader.cpp
++++ b/src/hydra/file_reader.cpp
+@@ -84,7 +84,10 @@ bool HdCyclesFileReader::read(Session *session,
+   }
+ 
+   const UsdTimeCode time(frame);
+-  SdfPath selected_camera(camera_path);
++  SdfPath selected_camera;
++  if (camera_path[0] != '\0') {
++    selected_camera = SdfPath(camera_path);
++  }
+   UsdRenderSettings render_settings;
+   if (settings_path[0] != '\0') {
+     render_settings = UsdRenderSettings(stage->GetPrimAtPath(SdfPath(settings_path)));
+diff --git a/src/kernel/CMakeLists.txt b/src/kernel/CMakeLists.txt
+index 7d803ea1..3eed0feb 100644
+--- a/src/kernel/CMakeLists.txt
++++ b/src/kernel/CMakeLists.txt
+@@ -87,6 +87,8 @@ set(SRC_KERNEL_SVM_HEADERS
+   svm/math_util.h
+   svm/integer_math.h
+   svm/mix.h
++  svm/mx_noise.h
++  svm/mx_hextile.h
+   svm/node_types.h
+   svm/node_types_template.h
+   svm/noise.h
+diff --git a/src/kernel/geom/gsplat_intersect.h b/src/kernel/geom/gsplat_intersect.h
+index 05f80492..5b8fa17d 100644
+--- a/src/kernel/geom/gsplat_intersect.h
++++ b/src/kernel/geom/gsplat_intersect.h
+@@ -80,6 +80,7 @@ ccl_device_forceinline GSplatIsectParams gsplat_intersect_get_params(
+ /* Distance and response of the Gaussian splat at its point of maximum response along the ray.
+  * Returns false when the ray misses the splat's bounding sphere or the point is outside of the
+  * ray range. */
++#    ifndef __KERNEL_METAL__
+ ccl_device_forceinline bool gsplat_intersect_response(KernelGlobals kg,
+                                                       const float3 ray_P,
+                                                       const float3 ray_D,
+@@ -91,6 +92,7 @@ ccl_device_forceinline bool gsplat_intersect_response(KernelGlobals kg,
+                                                       const int primitive_type,
+                                                       ccl_private float &r_t,
+                                                       ccl_private float &r_response);
++#    endif
+ 
+ /* Intersect ray against Gaussian splat.
+  * Performs stochastic alpha test described in [sun2025]. */

@@ -1,5 +1,9 @@
 # Cycles for Houdini
 
+This BDE fork adds native Apple Silicon/Metal builds, native Linux builds and
+an independent USD sequence renderer. See [native platforms and standalone USD](docs/NATIVE_PLATFORMS.md)
+for build commands, the qualification procedure and current limits.
+
 Blender's [Cycles](https://projects.blender.org/blender/cycles) as a Hydra render
 delegate for **Houdini 22 / Solaris**, with its shading nodes exposed natively in
 Houdini and a **Cycles Material Builder** to wire them in.
@@ -74,7 +78,7 @@ side the mix favours); a mix of two colours is computed; a procedural or a
 ramp shows as the input's default value. It is a preview, not a link to the
 Cycles nodes.
 
-Rendering is CPU and CUDA/OptiX, chosen from **Render › Cycles Render Device**.
+Rendering is CPU, CUDA/OptiX and native Apple Silicon Metal, chosen from **Render › Cycles Render Device**.
 The device is fixed when the render session is built, so it cannot come from a
 Render Settings node — and it describes the machine rather than the scene, so it
 is a per-installation preference the `.hip` does not carry.
@@ -106,7 +110,7 @@ rebuild, and so will the Python 3.11 flavour.
 | | |
 |---|---|
 | Houdini | 22.0 series, built against **22.0.368** (USD 26.05, Python 3.13, MaterialX 1.39.5) |
-| OS | Windows 11, MSVC 14.44 (VS2022 Build Tools) |
+| OS | Windows 11 upstream; native Apple Silicon; native Linux under qualification |
 | GPU | CUDA 12.9 + OptiX SDK, or CPU only. Kernels for every NVIDIA generation since Maxwell (GTX 9xx) up to RTX 50xx, plus a PTX fallback |
 | Also | CMake 3.28+, git, git-lfs |
 
@@ -130,7 +134,7 @@ applies the patch series, and installs into `install-53/`.
 python tools/bootstrap.py --version 5.3
 ```
 
-Options worth knowing: `--cuda-arch` takes a `;`-separated list and defaults to every NVIDIA generation since Maxwell plus a PTX fallback (`--cuda-arch=` builds no CUDA kernel at all, for a CPU-only build that is much quicker); `--jobs` defaults to the number of logical processors of the machine it runs on; with more than two CUDA architectures it passes `nvcc --split-compile=0`, which `--no-split-compile` turns off if memory is short.
+Options worth knowing: `--cuda-arch` takes a `;`-separated list and defaults to every NVIDIA generation since Maxwell plus a PTX fallback (`--cuda-arch=` builds no CUDA kernel); `--jobs` defaults to2; CUDA architectures build serially, and with more than two architectures nvcc uses two split-compilation threads. `--no-split-compile` disables that optimization. Apple Silicon builds Metal. `--standalone --no-osl` builds an independent USD runtime. Use separate `--build-dir` and `--install-dir` values for each Houdini SDK and the standalone runtime.
 
 The VOP library is not shipped: it is generated from the Sdr registry the built
 delegate publishes, so it always matches the Cycles you compiled. Generate it
@@ -214,7 +218,7 @@ The ones a user meets first:
   background); light filters are not supported.
 - Implicit surfaces carry no UVs.
 
-- GPU rendering is NVIDIA only (CUDA, OptiX); AMD (HIP), Intel (oneAPI) and Apple (Metal) devices are not built yet, and the CUDA kernels for generations other than the RTX 30 series are built but untested on hardware. See K-99 in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
+- Apple Silicon Metal now has a native build and real two-frame standalone acceptance on M2 Ultra. NVIDIA generations beyond the upstream RTX30 hardware test remain qualification gates; built cubins alone do not prove hardware rendering. AMD HIP and Intel oneAPI are outside the initial native build qualification. See [native-platform acceptance](docs/NATIVE_PLATFORMS.md).
 
 ## Credits
 

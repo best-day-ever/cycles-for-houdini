@@ -65,10 +65,12 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--version", choices=sorted(VERSIONS), default="5.3")
     p.add_argument("--zip", action="store_true", help="also write dist/<name>.zip")
+    p.add_argument("--install-dir", help="native SDK installation prefix")
+    p.add_argument("--name", help="platform/SDK-specific archive name")
     args = p.parse_args()
 
     cfg = VERSIONS[args.version]
-    install = os.path.join(ROOT, cfg["install"])
+    install = os.path.abspath(args.install_dir or os.path.join(ROOT, cfg["install"]))
     houdini = os.path.join(install, "houdini")
     template = os.path.join(ROOT, "external", cfg["dir"], "src", "hydra",
                             "resources", "cycles.json.in")
@@ -81,7 +83,9 @@ def main():
     if b"@" in package or ABSOLUTE.search(package):
         sys.exit("the package template still holds a build path: " + template)
 
-    name = "CyclesForHoudini-" + args.version
+    name = args.name or "CyclesForHoudini-" + args.version
+    if name != os.path.basename(name) or name in (".", ".."):
+        sys.exit("--name must be a single directory name")
     dist = os.path.join(ROOT, "dist", name)
     if os.path.exists(dist):
         shutil.rmtree(dist)

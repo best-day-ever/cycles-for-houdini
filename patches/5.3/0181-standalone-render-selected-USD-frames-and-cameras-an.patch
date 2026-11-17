@@ -1,0 +1,397 @@
+From 9dac0fcec116eb0c84049bceb33947e5cdba818f Mon Sep 17 00:00:00 2001
+From: BDE <dev@bde.run>
+Date: Tue, 17 Nov 2026 11:41:36 +0100
+Subject: [PATCH] standalone: render selected USD frames and cameras and fail
+ on render errors
+
+---
+ src/app/cycles_standalone.cpp  | 69 ++++++++++++++++++++++++++----
+ src/app/oiio_output_driver.cpp | 13 +++++-
+ src/app/oiio_output_driver.h   |  3 ++
+ src/hydra/file_reader.cpp      | 77 +++++++++++++++++++++++++++++++---
+ src/hydra/file_reader.h        |  7 +++-
+ 5 files changed, 153 insertions(+), 16 deletions(-)
+
+diff --git a/src/app/cycles_standalone.cpp b/src/app/cycles_standalone.cpp
+index 5f3de840..73b76c78 100644
+--- a/src/app/cycles_standalone.cpp
++++ b/src/app/cycles_standalone.cpp
+@@ -3,6 +3,8 @@
+  * SPDX-License-Identifier: Apache-2.0 */
+ 
+ #include <cstdio>
++#include <cmath>
++#include <cstdlib>
+ 
+ #include "device/device.h"
+ #include "scene/camera.h"
+@@ -49,6 +51,10 @@ struct Options {
+   bool show_help, interactive, pause;
+   string output_filepath;
+   string output_pass;
++  double frame = 1.0;
++  string camera_path;
++  string render_settings_path;
++  OIIOOutputDriver *output_driver = nullptr;
+ } options;
+ 
+ static void session_print(const string &str)
+@@ -105,7 +111,16 @@ static void scene_init()
+   /* Read XML or USD */
+ #ifdef WITH_USD
+   if (!string_endswith(string_to_lower(options.filepath), ".xml")) {
+-    HD_CYCLES_NS::HdCyclesFileReader::read(options.session.get(), options.filepath.c_str());
++    if (!HD_CYCLES_NS::HdCyclesFileReader::read(options.session.get(),
++                                              options.filepath.c_str(),
++                                              true,
++                                              options.frame,
++                                              options.camera_path.c_str(),
++                                              options.render_settings_path.c_str()))
++    {
++      fprintf(stderr, "Failed to read USD scene: %s\n", options.filepath.c_str());
++      exit(EXIT_FAILURE);
++    }
+   }
+   else
+ #endif
+@@ -140,8 +155,10 @@ static void session_init()
+ #endif
+ 
+   if (!options.output_filepath.empty()) {
+-    options.session->set_output_driver(make_unique<OIIOOutputDriver>(
+-        options.output_filepath, options.output_pass, session_print));
++    auto output_driver = make_unique<OIIOOutputDriver>(
++        options.output_filepath, options.output_pass, session_print);
++    options.output_driver = output_driver.get();
++    options.session->set_output_driver(std::move(output_driver));
+   }
+ 
+   if (options.session_params.background && !options.quiet) {
+@@ -376,8 +393,8 @@ static void parse_string(OIIO::cspan<const char *> argv, std::string *s)
+ 
+ static void options_parse(const int argc, const char **argv)
+ {
+-  options.width = 1024;
+-  options.height = 512;
++  options.width = 0;
++  options.height = 0;
+   options.filepath = "";
+   options.session = nullptr;
+   options.quiet = false;
+@@ -409,7 +426,7 @@ static void options_parse(const int argc, const char **argv)
+   bool version = false;
+   string log_level;
+ 
+-  ap.usage("cycles [options] file.xml");
++  ap.usage("cycles [options] scene.usd (or scene.xml)");
+   ap.arg("filename").hidden().action([&](auto argv) { options.filepath = argv[0]; });
+   ap.arg("--device %s:DEVICE").help("Devices to use: " + device_names).action([&](auto argv) {
+     parse_string(argv, &devicename);
+@@ -428,6 +445,20 @@ static void options_parse(const int argc, const char **argv)
+   ap.arg("--output %s:OUTPUT").help("File path to write output image").action([&](auto argv) {
+     parse_string(argv, &options.output_filepath);
+   });
++  ap.arg("--frame %s:FRAME").help("USD time code (default: 1)").action([&](auto argv) {
++    char *end = nullptr;
++    options.frame = std::strtod(argv[1], &end);
++    if (end == argv[1] || *end != '\0' || !std::isfinite(options.frame)) {
++      fprintf(stderr, "Invalid USD frame: %s\n", argv[1]);
++      exit(EXIT_FAILURE);
++    }
++  });
++  ap.arg("--camera %s:PATH").help("USD camera prim path").action([&](auto argv) {
++    parse_string(argv, &options.camera_path);
++  });
++  ap.arg("--render-settings %s:PATH").help("UsdRenderSettings prim path").action([&](auto argv) {
++    parse_string(argv, &options.render_settings_path);
++  });
+   ap.arg("--threads %d:THREADS").help("CPU Rendering Threads").action([&](auto argv) {
+     parse_int(argv, &options.session_params.threads);
+   });
+@@ -499,7 +530,20 @@ static void options_parse(const int argc, const char **argv)
+   }
+ 
+   /* find matching device */
+-  const DeviceType device_type = Device::type_from_string(devicename.c_str());
++  DeviceType device_type = Device::type_from_string(devicename.c_str());
++  if (devicename == "GPU") {
++    for (DeviceType candidate : {DEVICE_OPTIX, DEVICE_CUDA, DEVICE_METAL}) {
++      for (const DeviceInfo &info : Device::available_devices(DEVICE_MASK(candidate))) {
++        if (info.meets_driver_requirement) {
++          device_type = candidate;
++          break;
++        }
++      }
++      if (device_type != DEVICE_NONE) {
++        break;
++      }
++    }
++  }
+ 
+   bool device_available = false;
+   bool device_driver_outdated = false;
+@@ -542,6 +586,9 @@ static void options_parse(const int argc, const char **argv)
+     fprintf(stderr, "No file path specified\n");
+     exit(EXIT_FAILURE);
+   }
++  printf("Cycles device: %s | %s\n",
++         Device::string_from_type(options.session_params.device.type).c_str(),
++         options.session_params.device.description.c_str());
+ }
+ 
+ CCL_NAMESPACE_END
+@@ -560,6 +607,14 @@ int main(const int argc, const char **argv)
+ #endif
+     session_init();
+     options.session->wait();
++    if (options.session->progress.get_error() || options.session->progress.get_cancel() ||
++        (options.output_driver && options.output_driver->failed()))
++    {
++      fprintf(stderr, "Cycles render failed: %s\n",
++              options.session->progress.get_error_message().c_str());
++      session_exit();
++      return EXIT_FAILURE;
++    }
+     session_exit();
+ #ifdef WITH_CYCLES_STANDALONE_GUI
+   }
+diff --git a/src/app/oiio_output_driver.cpp b/src/app/oiio_output_driver.cpp
+index f6f55482..d2d2a8d2 100644
+--- a/src/app/oiio_output_driver.cpp
++++ b/src/app/oiio_output_driver.cpp
+@@ -33,6 +33,7 @@ void OIIOOutputDriver::write_render_tile(const Tile &tile)
+ 
+   unique_ptr<ImageOutput> image_output(ImageOutput::create(filepath_));
+   if (image_output == nullptr) {
++    failed_ = true;
+     log_("Failed to create image file");
+     return;
+   }
+@@ -42,12 +43,14 @@ void OIIOOutputDriver::write_render_tile(const Tile &tile)
+ 
+   const ImageSpec spec(width, height, 4, TypeDesc::FLOAT);
+   if (!image_output->open(filepath_, spec)) {
++    failed_ = true;
+     log_("Failed to create image file");
+     return;
+   }
+ 
+   vector<float> pixels(width * height * 4);
+   if (!tile.get_pass_pixels(pass_, 4, pixels.data())) {
++    failed_ = true;
+     log_("Failed to read render pass pixels");
+     return;
+   }
+@@ -70,8 +73,14 @@ void OIIOOutputDriver::write_render_tile(const Tile &tile)
+ 
+   /* Write to disk and close */
+   image_buffer.set_write_format(TypeDesc::FLOAT);
+-  image_buffer.write(image_output.get());
+-  image_output->close();
++  if (!image_buffer.write(image_output.get())) {
++    failed_ = true;
++    log_("Failed to write image pixels");
++  }
++  if (!image_output->close()) {
++    failed_ = true;
++    log_("Failed to close image file");
++  }
+ }
+ 
+ CCL_NAMESPACE_END
+diff --git a/src/app/oiio_output_driver.h b/src/app/oiio_output_driver.h
+index 311b8d02..98a31f4e 100644
+--- a/src/app/oiio_output_driver.h
++++ b/src/app/oiio_output_driver.h
+@@ -3,6 +3,7 @@
+  * SPDX-License-Identifier: Apache-2.0 */
+ 
+ #include <functional>
++#include <atomic>
+ 
+ #include "session/output_driver.h"
+ 
+@@ -18,11 +19,13 @@ class OIIOOutputDriver : public OutputDriver {
+   ~OIIOOutputDriver() override;
+ 
+   void write_render_tile(const Tile &tile) override;
++  bool failed() const { return failed_.load(); }
+ 
+  protected:
+   string filepath_;
+   string pass_;
+   LogFunction log_;
++  std::atomic<bool> failed_{false};
+ };
+ 
+ CCL_NAMESPACE_END
+diff --git a/src/hydra/file_reader.cpp b/src/hydra/file_reader.cpp
+index 7ac0259f..7db9c391 100644
+--- a/src/hydra/file_reader.cpp
++++ b/src/hydra/file_reader.cpp
+@@ -5,12 +5,14 @@
+ #include "hydra/file_reader.h"
+ #include "hydra/camera.h"
+ #include "hydra/render_delegate.h"
++#include "hydra/implicit_surface.h"
+ 
+ #include "util/log.h"
+ #include "util/path.h"
+ #include "util/unique_ptr.h"
+ 
+ #include "scene/scene.h"
++#include "scene/camera.h"
+ 
+ #include <pxr/base/plug/registry.h>
+ #include <pxr/imaging/hd/flatteningSceneIndex.h>
+@@ -30,6 +32,7 @@
+ #include <pxr/usd/usd/stage.h>
+ #include <pxr/usd/usdGeom/camera.h>
+ #include <pxr/usd/usdGeom/metrics.h>
++#include <pxr/usd/usdRender/settings.h>
+ #include <pxr/usdImaging/usdImaging/flattenedDataSourceProviders.h>
+ #include <pxr/usdImaging/usdImaging/materialBindingsResolvingSceneIndex.h>
+ #include <pxr/usdImaging/usdImaging/stageSceneIndex.h>
+@@ -63,7 +66,12 @@ class DummyHdTask : public HdTask {
+   TfTokenVector tags;
+ };
+ 
+-void HdCyclesFileReader::read(Session *session, const char *filepath, const bool use_camera)
++bool HdCyclesFileReader::read(Session *session,
++                              const char *filepath,
++                              const bool use_camera,
++                              const double frame,
++                              const char *camera_path,
++                              const char *settings_path)
+ {
+   /* Initialize USD. */
+   PlugRegistry::GetInstance().RegisterPlugins(path_get("usd"));
+@@ -72,7 +80,44 @@ void HdCyclesFileReader::read(Session *session, const char *filepath, const bool
+   const UsdStageRefPtr stage = UsdStage::Open(filepath);
+   if (!stage) {
+     LOG_ERROR << "USD failed to read " << filepath;
+-    return;
++    return false;
++  }
++
++  const UsdTimeCode time(frame);
++  SdfPath selected_camera(camera_path);
++  UsdRenderSettings render_settings;
++  if (settings_path[0] != '\0') {
++    render_settings = UsdRenderSettings(stage->GetPrimAtPath(SdfPath(settings_path)));
++    if (!render_settings) {
++      LOG_ERROR << "No UsdRenderSettings at " << settings_path;
++      return false;
++    }
++  }
++  else {
++    render_settings = UsdRenderSettings::GetStageRenderSettings(stage);
++  }
++  if (render_settings) {
++    if (selected_camera.IsEmpty()) {
++      SdfPathVector cameras;
++      render_settings.GetCameraRel().GetForwardedTargets(&cameras);
++      if (!cameras.empty()) {
++        selected_camera = cameras.front();
++      }
++    }
++    GfVec2i resolution;
++    if (render_settings.GetResolutionAttr().Get(&resolution, time) &&
++        resolution[0] > 0 && resolution[1] > 0)
++    {
++      session->scene->camera->set_full_width(resolution[0]);
++      session->scene->camera->set_full_height(resolution[1]);
++    }
++  }
++  if (!selected_camera.IsEmpty() &&
++      (!selected_camera.IsAbsolutePath() ||
++       !stage->GetPrimAtPath(selected_camera).IsA<UsdGeomCamera>()))
++  {
++    LOG_ERROR << "No USD camera at " << selected_camera;
++    return false;
+   }
+ 
+   /* Init paths. */
+@@ -83,6 +128,17 @@ void HdCyclesFileReader::read(Session *session, const char *filepath, const bool
+   HdRenderSettingsMap settings_map;
+   settings_map.insert(std::make_pair(HdCyclesRenderSettingsTokens->stageMetersPerUnit,
+                                      VtValue(UsdGeomGetStageMetersPerUnit(stage))));
++  if (render_settings) {
++    for (const UsdAttribute &attribute : render_settings.GetPrim().GetAttributes()) {
++      const std::string name = attribute.GetName().GetString();
++      if (name.compare(0, 7, "cycles:") == 0) {
++        VtValue value;
++        if (attribute.Get(&value, time)) {
++          settings_map[attribute.GetName()] = value;
++        }
++      }
++    }
++  }
+ 
+   HdCyclesDelegate render_delegate(settings_map, session, true);
+ 
+@@ -93,12 +149,13 @@ void HdCyclesFileReader::read(Session *session, const char *filepath, const bool
+    * Do ext computation (e.g. skinning), flattening and resolve material bindings. */
+   UsdImagingStageSceneIndexRefPtr stage_si = UsdImagingStageSceneIndex::New(nullptr);
+   stage_si->SetStage(stage);
+-  stage_si->SetTime(UsdTimeCode::Default());
++  stage_si->SetTime(time);
+ 
+   HdSceneIndexBaseRefPtr filtered = stage_si;
+   filtered = HdSiExtComputationPrimvarPruningSceneIndex::New(filtered);
+   filtered = HdFlatteningSceneIndex::New(filtered, UsdImagingFlattenedDataSourceProviders());
+   filtered = UsdImagingMaterialBindingsResolvingSceneIndex::New(filtered, nullptr);
++  filtered = HdCyclesImplicitSurfaceSceneIndex::New(filtered);
+ 
+   /* Provide DummyHdTask as a task prim to the scene index. */
+   HdRprimCollection collection(HdTokens->geometry, HdReprSelector(HdReprTokens->smoothHull));
+@@ -141,20 +198,28 @@ void HdCyclesFileReader::read(Session *session, const char *filepath, const bool
+   render_index->SyncAll(&tasks, &task_context);
+   render_delegate.CommitResources(&render_index->GetChangeTracker());
+ 
+-  /* Use first camera in stage.
+-   * TODO: get camera from UsdRender if available. */
++  /* Explicit CLI camera wins, then the stage render settings, then the first
++   * camera for older USDs without render settings. */
+   if (use_camera) {
++    bool found_camera = false;
+     for (const UsdPrim &prim : stage->Traverse()) {
+-      if (prim.IsA<UsdGeomCamera>()) {
++      if (prim.IsA<UsdGeomCamera>() &&
++          (selected_camera.IsEmpty() || prim.GetPath() == selected_camera)) {
+         HdSprim *sprim = render_index->GetSprim(HdPrimTypeTokens->camera, prim.GetPath());
+         if (sprim) {
+           HdCyclesCamera *camera = dynamic_cast<HdCyclesCamera *>(sprim);
+           camera->ApplyCameraSettings(render_delegate.GetRenderParam(), session->scene->camera);
++          found_camera = true;
+           break;
+         }
+       }
+     }
++    if (!found_camera) {
++      LOG_ERROR << "USD stage has no usable camera";
++      return false;
++    }
+   }
++  return true;
+ }
+ 
+ HDCYCLES_NAMESPACE_CLOSE_SCOPE
+diff --git a/src/hydra/file_reader.h b/src/hydra/file_reader.h
+index 2477d848..35c85348 100644
+--- a/src/hydra/file_reader.h
++++ b/src/hydra/file_reader.h
+@@ -12,7 +12,12 @@ HDCYCLES_NAMESPACE_OPEN_SCOPE
+ 
+ class HdCyclesFileReader {
+  public:
+-  static void read(Session *session, const char *filepath, const bool use_camera = true);
++  static bool read(Session *session,
++                   const char *filepath,
++                   const bool use_camera = true,
++                   const double frame = 1.0,
++                   const char *camera_path = "",
++                   const char *settings_path = "");
+ };
+ 
+ HDCYCLES_NAMESPACE_CLOSE_SCOPE
