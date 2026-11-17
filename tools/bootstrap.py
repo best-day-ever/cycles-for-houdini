@@ -120,6 +120,41 @@ def apply_patches(src, version):
     run(["git"] + identity + ["am"] + patches, cwd=src)
 
 
+def prepare_usd_cxx20_compat(src, build, target, houdini=""):
+    """Overlay the pinned USD constructor spelling rejected by GCC C++20.
+
+    The dependency checkout stays untouched. This only removes a redundant
+    template-id from a constructor, as fixed in upstream USD; layout and ABI
+    are unchanged. A different defective header requires another review.
+    """
+    if not target.startswith("linux_"):
+        return []
+    relative = os.path.join("pxr", "imaging", "hd", "retainedDataSource.h")
+    source = (os.path.join(houdini, "toolkit", "include", relative) if houdini else
+              os.path.join(src, "lib", target, "usd", "include", relative))
+    if not os.path.isfile(source):
+        return []
+    with open(source, "rb") as stream:
+        original = stream.read()
+    old = b"HdRetainedTypedSampledDataSource<bool>(const bool& value)"
+    if old not in original:
+        return []
+    digest = hashlib.sha256(original).hexdigest()
+    if digest != "db9dfe869b2c33e48b9b1f14e7b56ac378e4df85e00e22f1b5781478b83df19d":
+        raise ValueError("Review USD's C++20 compatibility header before building: " + digest)
+    corrected = original.replace(old, b"HdRetainedTypedSampledDataSource(const bool& value)")
+    include = os.path.abspath(os.path.join(build, "usd-cxx20-compat", "include"))
+    destination = os.path.join(include, relative)
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    with open(destination, "wb") as stream:
+        stream.write(corrected)
+    with open(os.path.join(build, "usd-cxx20-compat", "identity.json"), "w") as stream:
+        json.dump({"source_sha256": digest,
+                   "overlay_sha256": hashlib.sha256(corrected).hexdigest()}, stream, indent=2)
+    return ["-DCMAKE_PROJECT_INCLUDE=" + os.path.join(HERE, "usd_cxx20_compat.cmake"),
+            "-DCYCLES_USD_COMPAT_INCLUDE=" + include]
+
+
 def configure(src, cfg, houdini, optix, arch, osl, split=True,
               build=None, install=None, extra=(), target=None):
     build = build or os.path.join(src, "build")
@@ -157,7 +192,13 @@ def configure(src, cfg, houdini, optix, arch, osl, split=True,
         args += ["-DWITH_CYCLES_DEVICE_OPTIX=ON", "-DOPTIX_ROOT_DIR=" + optix.replace("\\", "/")]
     else:
         args += ["-DWITH_CYCLES_DEVICE_OPTIX=OFF"]
-    run(args + list(extra))
+    compatibility = prepare_usd_cxx20_compat(src, build, target, houdini)
+    if compatibility and any(arg.startswith("-DCMAKE_PROJECT_INCLUDE=") for arg in extra):
+        raise ValueError("The USD compatibility overlay needs CMAKE_PROJECT_INCLUDE; combine custom hooks explicitly")
+    if target.startswith("linux_") and not compatibility:
+        # Disable an overlay cached by a previous configuration of this directory.
+        compatibility = ["-DCYCLES_USD_COMPAT_INCLUDE="]
+    run(args + compatibility + list(extra))
     return build
 
 

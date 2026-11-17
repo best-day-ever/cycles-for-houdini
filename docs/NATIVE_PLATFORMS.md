@@ -39,6 +39,13 @@ configure log for every requested architecture; an older toolkit may skip an
 unsupported architecture. The build defaults to two jobs, serial CUDA
 architectures and bounded nvcc split compilation.
 
+The pinned Linux USD26.08 header has a constructor template-id rejected by
+GCC's C++20 mode. Bootstrap supplies a checksum-guarded header overlay with the
+upstream-corrected spelling, without modifying the dependency checkout or its
+ABI. Only Hydra consumers use it, so existing CPU/GPU kernel build objects
+remain reusable. The overlay's original/result hashes are recorded under the
+build directory's `usd-cxx20-compat/identity.json`.
+
 Choose an OptiX SDK compatible with the installed driver. For an R580 driver,
 use OptiX9.0 (R570 or newer); OptiX9.1 requires R590 or newer. This lets the
 native Ada/Blackwell build retain the workstation's existing driver.
