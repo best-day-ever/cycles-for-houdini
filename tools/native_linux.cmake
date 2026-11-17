@@ -7,11 +7,6 @@ function(cycles_apply_native_linux_compat)
       set_target_properties(${cycles_loader} PROPERTIES C_VISIBILITY_PRESET hidden)
     endif()
   endforeach()
-  if(TARGET hdCycles)
-    # Upstream installs this target as a file, bypassing CMake's RPATH rewrite.
-    set_target_properties(hdCycles PROPERTIES
-      BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "$ORIGIN/../../lib")
-  endif()
   if(NOT CYCLES_USD_COMPAT_INCLUDE)
     return()
   endif()

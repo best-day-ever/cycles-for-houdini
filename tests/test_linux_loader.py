@@ -20,8 +20,10 @@ class LinuxLoaderTests(unittest.TestCase):
             root = Path(temporary)
             (root / 'cuew.c').write_text('static int stub(int x) { return -1; }\n'
                                         'int (*cuInit)(int) = stub;\n')
-            (root / 'driver.c').write_text('int cuInit(int x) { return 42; }\n')
-            (root / 'module.c').write_text('extern int cuInit(int);\nint probe(void) { return cuInit(0); }\n')
+            (root / 'driver.c').write_text('int cuInit(int x) { return 40; }\n')
+            (root / 'sdk.c').write_text('int hgiSupport(void) { return 2; }\n')
+            (root / 'module.c').write_text('extern int cuInit(int);\nextern int hgiSupport(void);\n'
+                                          'int probe(void) { return cuInit(0) + hgiSupport(); }\n')
             (root / 'main.c').write_text('''#include <dlfcn.h>
 extern int (*cuInit)(int);
 int main(int argc, char **argv) {
@@ -36,8 +38,11 @@ int main(int argc, char **argv) {
 project(LoaderRegression C)
 add_library(extern_cuew STATIC cuew.c)
 add_library(driver SHARED driver.c)
+add_library(sdk SHARED sdk.c)
 add_library(module SHARED module.c)
-target_link_libraries(module PRIVATE driver)
+target_link_libraries(module PRIVATE driver sdk)
+set_target_properties(module PROPERTIES BUILD_RPATH
+  "${CMAKE_CURRENT_BINARY_DIR}/original-very-long-native-houdini-sdk-prefix/dsolib")
 add_executable(probe main.c)
 set_target_properties(probe PROPERTIES ENABLE_EXPORTS ON)
 target_link_libraries(probe PRIVATE extern_cuew dl)
@@ -56,7 +61,11 @@ target_link_libraries(probe PRIVATE extern_cuew dl)
             library_dir.mkdir()
             shutil.copy2(build / 'libmodule.so', delegate_dir / 'hdCycles.so')
             shutil.copy2(build / 'libdriver.so', library_dir)
-            relocate_linux_delegate(str(plugin))
+            sdk = root / 'target-houdini'
+            (sdk / 'dsolib').mkdir(parents=True)
+            shutil.copy2(build / 'libsdk.so', sdk / 'dsolib')
+            relocate_linux_delegate(str(plugin), str(sdk))
             # Remove the original dependency: only the relocated relative path works.
             (build / 'libdriver.so').unlink()
+            (build / 'libsdk.so').unlink()
             subprocess.run([str(build / 'probe'), str(delegate_dir / 'hdCycles.so')], check=True)

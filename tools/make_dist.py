@@ -64,7 +64,7 @@ def scan(dist):
     return bad
 
 
-def relocate_linux_delegate(plugin):
+def relocate_linux_delegate(plugin, houdini_runtime=""):
     """Fix file-installed delegates, for which CMake skips install RPATH edits."""
     if not sys.platform.startswith("linux"):
         return
@@ -74,6 +74,10 @@ def relocate_linux_delegate(plugin):
     if not match:
         raise ValueError("Missing native delegate library path: " + delegate)
     relative = "$ORIGIN/../../lib"
+    if houdini_runtime:
+        if not os.path.isabs(houdini_runtime):
+            raise ValueError("The Houdini runtime prefix must be absolute")
+        relative += ":" + houdini_runtime + "/dsolib:" + houdini_runtime + "/python/lib"
     if match.group(1) == relative:
         return
     with tempfile.TemporaryDirectory(prefix="cycles-rpath-") as temporary:
@@ -93,7 +97,11 @@ def main():
     p.add_argument("--zip", action="store_true", help="also write dist/<name>.zip")
     p.add_argument("--install-dir", help="native SDK installation prefix")
     p.add_argument("--name", help="platform/SDK-specific archive name")
+    p.add_argument("--houdini-runtime", default="",
+                   help="Linux target's exact installed Houdini prefix (for SDK library lookup)")
     args = p.parse_args()
+    if sys.platform.startswith("linux") and not args.houdini_runtime:
+        p.error("Linux clients need --houdini-runtime with the target's exact SDK prefix")
 
     cfg = VERSIONS[args.version]
     install = os.path.abspath(args.install_dir or os.path.join(ROOT, cfg["install"]))
@@ -118,7 +126,7 @@ def main():
     plugin = os.path.join(dist, PLUGIN_DIR)
 
     copy_tree(houdini, os.path.join(plugin, "houdini"))
-    relocate_linux_delegate(plugin)
+    relocate_linux_delegate(plugin, args.houdini_runtime)
     licence = os.path.join(install, "license")
     if os.path.isdir(licence):
         copy_tree(licence, os.path.join(plugin, "licenses"))

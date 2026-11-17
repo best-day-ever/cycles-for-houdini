@@ -30,6 +30,13 @@ python3 tools/make_dist.py --install-dir /tmp/cycles-install/h22 \
   --name CyclesForHoudini-5.3-h22-macos-arm64 --zip
 ```
 
+For a Linux client, also pass `--houdini-runtime /opt/hfs22.0.466` to
+`make_dist.py`, using the target machine's exact Houdini installation prefix.
+Packaging replaces the build machine's library paths with the plugin's own
+relative libraries and that SDK's `dsolib`/Python libraries. It never bundles
+SideFX libraries. Relocate the finished package and test fresh hython/Husk
+processes against that exact installed SDK.
+
 For NVIDIA, provide the OptiX SDK with `--optix "$OPTIX_ROOT_DIR"` and a CUDA
 toolkit using `--cmake-arg=-DCUDA_TOOLKIT_ROOT_DIR="$CUDA_ROOT"`. CUDA12.9 builds
 native Ada (`sm_89`, RTX40) and Blackwell (`sm_120`, RTX50/RTX PRO Blackwell)
@@ -43,6 +50,8 @@ The pinned denoiser/Embree dependencies also require the SYCL runtime libraries
 when the Cycles oneAPI backend is disabled. Bootstrap fetches those runtime
 DSOs without downloading the oneAPI compiler. Both packagers reject unresolved
 Git LFS pointers instead of publishing incomplete libraries.
+The native Linux build also hides CUEW/HIPEW's function-pointer tables, so
+OIDN's dynamically loaded CUDA backend resolves driver functions correctly.
 
 The pinned Linux USD26.08 header has a constructor template-id rejected by
 GCC's C++20 mode. Bootstrap supplies a checksum-guarded header overlay with the
