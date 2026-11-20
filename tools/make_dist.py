@@ -18,7 +18,9 @@ file still names a drive letter.
 """
 
 import argparse
+import gzip
 import os
+from pathlib import Path
 import re
 import shutil
 import subprocess
@@ -37,6 +39,7 @@ PLUGIN_DIR = "CyclesForHoudini"
 SKIP_DIRS = {"backup", "__pycache__", "packages"}
 TEXT_EXT = {".json", ".py", ".ds", ".xml", ".shelf", ".txt", ".cmake"}
 ABSOLUTE = re.compile(rb"(?<![A-Za-z0-9])[A-Za-z]:[\\/][A-Za-z0-9_$ .-]")
+ASSET_SUFFIXES = {".hda", ".hdalc", ".hdanc", ".otl", ".otllc", ".otlnc"}
 
 
 def copy_tree(src, dst):
@@ -62,6 +65,26 @@ def scan(dist):
                 if ABSOLUTE.search(f.read()):
                     bad.append(path)
     return bad
+
+
+def verify_houdini_assets(otls, hotl):
+    """Inspect embedded node networks as well as the library file name."""
+    libraries = sorted(path for path in Path(otls).rglob("*")
+                       if path.is_file() and path.suffix.lower() in ASSET_SUFFIXES)
+    if not libraries:
+        raise ValueError(f"No Houdini asset libraries found in {otls}")
+    with tempfile.TemporaryDirectory(prefix="cycles-hda-check-") as temporary:
+        for index, library in enumerate(libraries):
+            if library.suffix.lower() in {".hdanc", ".otlnc"}:
+                raise ValueError(f"Non-Commercial Houdini asset library: {library}")
+            expanded = Path(temporary) / str(index)
+            subprocess.run([hotl, "-x", str(expanded), str(library)], check=True)
+            for contents in expanded.rglob("Contents.gz"):
+                # Houdini prefixes the embedded network with a four-byte size.
+                with gzip.open(contents, "rb") as stream:
+                    signature = stream.read(9)[4:]
+                if signature == b"HouNC":
+                    raise ValueError(f"Non-Commercial embedded Houdini network: {library} ({contents.parent.name})")
 
 
 def relocate_linux_delegate(plugin, houdini_runtime=""):
@@ -117,9 +140,13 @@ def main():
     p.add_argument("--zip", action="store_true", help="also write dist/<name>.zip")
     p.add_argument("--install-dir", help="native SDK installation prefix")
     p.add_argument("--name", help="platform/SDK-specific archive name")
+    p.add_argument("--hotl", default=shutil.which("hotl"),
+                   help="Exact Houdini SDK's hotl utility (default: hotl on PATH)")
     p.add_argument("--houdini-runtime", default="",
                    help="Target's exact installed Houdini prefix (for SDK library lookup)")
     args = p.parse_args()
+    if not args.hotl:
+        p.error("Use the exact Houdini SDK's hotl on PATH or pass --hotl")
     if sys.platform.startswith("linux") and not args.houdini_runtime:
         p.error("Linux clients need --houdini-runtime with the target's exact SDK prefix")
 
@@ -146,6 +173,7 @@ def main():
     plugin = os.path.join(dist, PLUGIN_DIR)
 
     copy_tree(houdini, os.path.join(plugin, "houdini"))
+    verify_houdini_assets(os.path.join(plugin, "houdini", "otls"), args.hotl)
     relocate_linux_delegate(plugin, args.houdini_runtime)
     relocate_macos_delegate(plugin, args.houdini_runtime)
     licence = os.path.join(install, "license")

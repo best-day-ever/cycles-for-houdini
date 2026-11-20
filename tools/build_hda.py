@@ -12,13 +12,13 @@ Run with hython:
 """
 
 import os
+import tempfile
 
 import hou
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
-OTLS = os.path.join(ROOT, "external", "cycles", "src", "hydra", "resources", "otls")
-HDA = os.path.join(OTLS, "hdcycles_flatten_op_textures.hda")
+from build_aovs_hda import HDA_DIR, require_authoring_license, save_asset
+
+HDA = os.path.join(HDA_DIR, "hdcycles_flatten_op_textures.hda")
 
 TYPE_NAME = "hdcycles::flatten_op_textures::1.0"
 LABEL = "Flatten COP Textures"
@@ -36,7 +36,7 @@ if count:
 '''
 
 
-def main():
+def build(scratch):
     stage = hou.node("/stage")
     subnet = stage.createNode("subnet", "flatten_tmp")
 
@@ -45,11 +45,9 @@ def main():
     script.setFirstInput(subnet.indirectInputs()[0])
     script.setDisplayFlag(True)
 
-    os.makedirs(OTLS, exist_ok=True)
-
     asset = subnet.createDigitalAsset(
         name=TYPE_NAME,
-        hda_file_name=HDA,
+        hda_file_name=os.path.join(scratch, "build.hda"),
         description=LABEL,
         min_num_inputs=1,
         max_num_inputs=1,
@@ -71,10 +69,14 @@ def main():
              "temporary directory is used."))
     definition.setParmTemplateGroup(group)
 
-    definition.save(HDA, asset, hou.HDAOptions())
-
-    print("HDA written:", HDA)
-    print("Type      :", TYPE_NAME)
+    save_asset(asset, HDA)
 
 
-main()
+def main():
+    require_authoring_license()
+    with tempfile.TemporaryDirectory(prefix="hda_") as scratch:
+        build(scratch)
+
+
+if __name__ == "__main__":
+    main()

@@ -91,9 +91,9 @@ rename, a dead parameter, a dropped input (`mtlx_inputs.py`), a wrong value
 on the 49 MaterialX cases, a wrong closure mix, a surface model's default,
 a wrong pass, a prim rendered where its settings hide it, a curve or an
 instance drawn in the wrong place. What it cannot see is the live viewport:
-`tests/houdini/` holds the scenes to check there.
+`tests/houdini/` holds Non-Commercial `.hipnc` scenes for a disposable Houdini session.
 
-`tests/houdini/lights_live.hip`
+`tests/houdini/lights_live.hipnc`
 is the scene for live light edits: its `edit` LOP sets the shadow colour,
 lobe multipliers and the cylinder's roll.
 
