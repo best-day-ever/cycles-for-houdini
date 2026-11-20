@@ -543,7 +543,7 @@ confirmed in Solaris with a proxy/render pair.
 Checked: under husk the proxy and guide prims were never rendered
 (Hydra does not sync them). In the viewport an already built prim stayed when
 its purpose was turned off; 0090 hides and shows prims as the render tags
-change. Confirmed in Houdini (`tests/houdini/purpose_toggle.hip`):
+change. Confirmed in Houdini (`tests/houdini/purpose_toggle.hipnc`):
 each purpose toggle shows and hides its object.
 
 ### K-29 `background = false` under husk — confirmed — **measured, not a cause**
@@ -598,7 +598,7 @@ until the delegate is recreated.
 Fixed: both flags tracked; blur is on when neither is set, and
 prims synced without it or over another shutter are synced again. Batch
 behaviour measured (`bench_settings.py`). In Houdini, user,
-`tests/houdini/motion_toggle.hip`) the blur came back, but turning it off made
+`tests/houdini/motion_toggle.hipnc`) the blur came back, but turning it off made
 the moving object vanish until the render was restarted: prims kept their
 motion samples. Patch 0091 resyncs them on the way off too. Rechecked live
 2026-10-09: off now keeps the object, but on never blurred again - K-81.
@@ -805,7 +805,7 @@ overrides. Karma's own fallback shading stays about twice as dark (see
 `bench_agree.py`). `tools/bench_settings.py`, `display_color_vertex`.
 
 ### K-81 Motion blur turned back on in a live viewport never showed — confirmed — **fixed** (0123)
-Checked in a live Houdini (`tests/houdini/motion_toggle.hip`,
+Checked in a live Houdini (`tests/houdini/motion_toggle.hipnc`,
 a GUI capture script): with the renderer started while
 `disableMotionBlur` was on, unticking it restarted the render but the moving
 ball stayed sharp until the frame changed or the renderer was restarted

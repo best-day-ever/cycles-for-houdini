@@ -18,11 +18,10 @@ import tempfile
 
 import hou
 
-from build_aovs_hda import (CYCLES, MENU_SCRIPT, SCRIPT, aov_folders, finish_definition,
-                            save_asset)
+from build_aovs_hda import (HDA_DIR, MENU_SCRIPT, SCRIPT, aov_folders, finish_definition,
+                            require_authoring_license, save_asset)
 
-HDA = os.path.join(CYCLES, "src", "hydra", "resources", "otls",
-                   "hdcycles_render_settings.hda")
+HDA = os.path.join(HDA_DIR, "hdcycles_render_settings.hda")
 TYPE_NAME = "hdcycles::cycles_render_settings::1.0"
 LABEL = "Cycles Render Settings"
 
@@ -89,6 +88,8 @@ def parameters(settings, controls):
     group.append(hou.SeparatorParmTemplate("sep_rendering"))
 
     cycles_global = rs.findFolder(("Cycles", "Global"))
+    if cycles_global is None:
+        raise RuntimeError("Register the target Cycles delegate before building Render Settings")
     rendering = [_strip_controls(f, controls) for f in cycles_global.parmTemplates()
                  if f.type() == hou.parmTemplateType.Folder]
     # Collapsible sections open on the Rendering tab, as on Karma's node.
@@ -113,7 +114,7 @@ def parameters(settings, controls):
     return group
 
 
-def main():
+def build(scratch):
     stage = hou.node("/stage")
     subnet = stage.createNode("subnet", "cycles_render_settings_tmp")
     settings = subnet.createNode("rendersettings", "settings")
@@ -131,7 +132,6 @@ def main():
     controls = []
     group = parameters(settings, controls)
 
-    scratch = tempfile.mkdtemp(prefix="hda_")
     asset = subnet.createDigitalAsset(
         name=TYPE_NAME, hda_file_name=os.path.join(scratch, "build.hda"), description=LABEL,
         min_num_inputs=1, max_num_inputs=1, ignore_external_references=True)
@@ -177,4 +177,11 @@ def main():
     save_asset(asset, HDA)
 
 
-main()
+def main():
+    require_authoring_license()
+    with tempfile.TemporaryDirectory(prefix="hda_") as scratch:
+        build(scratch)
+
+
+if __name__ == "__main__":
+    main()

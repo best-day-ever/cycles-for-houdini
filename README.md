@@ -149,7 +149,9 @@ once the install exists, with Houdini's Python:
 hython tools/build_cycles_vops.py
 ```
 
-Then assemble the folder to hand to Houdini:
+Generate the three Solaris digital assets under the intended Houdini
+entitlement before packaging. See [native build and license checks](docs/NATIVE_PLATFORMS.md#builds).
+Then assemble the folder with the exact Houdini SDK's `hotl` on PATH:
 
 ```
 python tools/make_dist.py --version 5.3

@@ -26,6 +26,15 @@ python3 tools/bootstrap.py --no-osl --jobs 2 --houdini "$HOUDINI_ROOT" \
 HOUDINI_PATH='/tmp/cycles-install/h22/houdini:&' \
 PXR_PLUGINPATH_NAME=/tmp/cycles-install/h22/houdini/dso/usd_plugins \
 CYCLES_INSTALL_DIR=/tmp/cycles-install/h22 hython tools/build_cycles_vops.py
+
+# Exact hython running under the intended Commercial or Indie entitlement.
+export HOUDINI_PATH='/tmp/cycles-install/h22/houdini:&'
+export PXR_PLUGINPATH_NAME=/tmp/cycles-install/h22/houdini/dso/usd_plugins
+export CYCLES_HDA_DIR=/tmp/cycles-install/h22/houdini/otls
+for script in build_aovs_hda.py build_render_settings_hda.py build_hda.py; do
+  hython "tools/$script" || exit 1
+done
+
 python3 tools/make_dist.py --install-dir /tmp/cycles-install/h22 \
   --houdini-runtime /Applications/Houdini/Houdini22.0.466 \
   --name CyclesForHoudini-5.3-h22-macos-arm64 --zip
@@ -39,6 +48,14 @@ signature; on Linux it replaces the ELF RPATH. Native loader fixtures prove
 that the packaged plugin still loads after original dependencies are removed. It never bundles
 SideFX libraries. Relocate the finished package and test fresh hython/Husk
 processes against that exact installed SDK.
+
+Author Commercial distributions under a Commercial entitlement. Author Indie
+distributions under Indie or Commercial. The three LOP generators build fresh
+networks from the Python sources using the running Houdini entitlement. The
+packager uses the SDK's `hotl` to refuse embedded Non-Commercial networks,
+including networks inside a library named `.hda`. Use a fresh GUI session of
+the target edition to place and cook all three LOPs, then save and reopen a
+scratch scene. Hython alone can miss a downgrade that occurs in the GUI.
 
 For NVIDIA, provide the OptiX SDK with `--optix "$OPTIX_ROOT_DIR"` and a CUDA
 toolkit using `--cmake-arg=-DCUDA_TOOLKIT_ROOT_DIR="$CUDA_ROOT"`. CUDA12.9 builds

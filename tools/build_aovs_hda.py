@@ -16,7 +16,8 @@ import hou
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CYCLES = os.environ.get("CYCLES_SOURCE", os.path.join(ROOT, "external", "cycles-53"))
-HDA = os.path.join(CYCLES, "src", "hydra", "resources", "otls", "hdcycles_aovs.hda")
+HDA_DIR = os.environ.get("CYCLES_HDA_DIR", os.path.join(CYCLES, "src", "hydra", "resources", "otls"))
+HDA = os.path.join(HDA_DIR, "hdcycles_aovs.hda")
 
 ICON = os.path.join(CYCLES, "src", "hydra", "resources", "icons", "blender_icon_128x128.png")
 
@@ -195,16 +196,22 @@ def finish_definition(definition, parms):
 def save_asset(asset, path):
     """Saves through a scratch file: saving over an existing library makes Houdini
     keep a backup folder next to it, here in the source tree."""
-    scratch = tempfile.mkdtemp(prefix="hda_")
-    tmp = os.path.join(scratch, os.path.basename(path))
-    asset.type().definition().save(tmp, asset, hou.HDAOptions())
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    shutil.copyfile(tmp, path)
-    shutil.rmtree(scratch, ignore_errors=True)
+    with tempfile.TemporaryDirectory(prefix="hda_") as scratch:
+        tmp = os.path.join(scratch, os.path.basename(path))
+        asset.type().definition().save(tmp, asset, hou.HDAOptions())
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        shutil.copyfile(tmp, path)
     print("HDA written:", path)
 
 
+def require_authoring_license():
+    license_category = hou.licenseCategory()
+    if license_category not in (hou.licenseCategoryType.Commercial, hou.licenseCategoryType.Indie):
+        raise RuntimeError(f"Author Cycles assets in Houdini Commercial or Indie, got {license_category}")
+
+
 def main():
+    require_authoring_license()
     stage = hou.node("/stage")
     subnet = stage.createNode("subnet", "cycles_aovs_tmp")
     script = subnet.createNode("pythonscript", "author_render_vars")
@@ -216,12 +223,12 @@ def main():
         if child.type().name() == "output":
             child.setFirstInput(script)
 
-    scratch = tempfile.mkdtemp(prefix="hda_")
-    asset = subnet.createDigitalAsset(
-        name=TYPE_NAME, hda_file_name=os.path.join(scratch, "build.hda"), description=LABEL,
-        min_num_inputs=1, max_num_inputs=1, ignore_external_references=True)
-    finish_definition(asset.type().definition(), parameters())
-    save_asset(asset, HDA)
+    with tempfile.TemporaryDirectory(prefix="hda_") as scratch:
+        asset = subnet.createDigitalAsset(
+            name=TYPE_NAME, hda_file_name=os.path.join(scratch, "build.hda"), description=LABEL,
+            min_num_inputs=1, max_num_inputs=1, ignore_external_references=True)
+        finish_definition(asset.type().definition(), parameters())
+        save_asset(asset, HDA)
 
 
 if __name__ == "__main__":
