@@ -27,9 +27,13 @@ KARMA_SAMPLES = 11
 EXPORTED_SAMPLES = 64
 NATIVE_SAMPLES = 5
 CLI_SAMPLES = 3
+SURFACES = {
+    "standard-surface": ("ND_standard_surface_surfaceshader", "specular"),
+    "openpbr": ("ND_open_pbr_surface_surfaceshader", "specular_weight"),
+}
 
 
-def author(stage):
+def author(stage, surface):
     camera = UsdGeom.Camera.Define(stage, CAMERA)
     camera.AddTranslateOp().Set(Gf.Vec3d(0, 0, 8))
     camera.CreateFocalLengthAttr(32)
@@ -40,9 +44,10 @@ def author(stage):
 
     material = UsdShade.Material.Define(stage, "/World/looks/red")
     shader = UsdShade.Shader.Define(stage, "/World/looks/red/surface")
-    shader.CreateIdAttr("ND_standard_surface_surfaceshader")
+    shader_id, specular_input = SURFACES[surface]
+    shader.CreateIdAttr(shader_id)
     shader.CreateInput("base_color", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(.65, .14, .04))
-    shader.CreateInput("specular", Sdf.ValueTypeNames.Float).Set(.2)
+    shader.CreateInput(specular_input, Sdf.ValueTypeNames.Float).Set(.2)
     shader.CreateInput("specular_roughness", Sdf.ValueTypeNames.Float).Set(.35)
     shader.CreateOutput("out", Sdf.ValueTypeNames.Token)
     material.CreateSurfaceOutput("kma").ConnectToSource(shader.ConnectableAPI(), "out")
@@ -63,13 +68,14 @@ def author(stage):
     light.CreateIntensityAttr(6)
 
 
-def save_scene(output):
+def save_scene(output, surface):
     parent = hou.node("/stage")
     look = parent.createNode("pythonscript", "shared_materialx")
     script = Path(__file__).resolve()
     look.parm("python").set(
         "import hou, runpy\n"
-        + f"runpy.run_path({str(script)!r}, run_name='fixture')['author'](hou.pwd().editableStage())\n"
+        + f"author = runpy.run_path({str(script)!r}, run_name='fixture')['author']\n"
+        + f"author(hou.pwd().editableStage(), {surface!r})\n"
     )
 
     render = parent.createNode("karmarenderproperties", "karma_xpu")
@@ -95,6 +101,8 @@ def save_scene(output):
     assert [str(path) for path in settings.GetCameraRel().GetTargets()] == [CAMERA]
     assert settings.GetPrim().GetAttribute("karma:global:pathtracedsamples").Get() == KARMA_SAMPLES
     assert not settings.GetPrim().GetAttribute("cycles:samples")
+    shader = UsdShade.Shader.Get(stage, "/World/looks/red/surface")
+    assert shader.GetIdAttr().Get() == SURFACES[surface][0]
     assert stage.Export(str(usd))
     return hip, usd
 
@@ -133,13 +141,14 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--delegate", choices=("cpu", "gpu"), default="cpu")
     parser.add_argument("--standalone", type=Path, help="Executable standalone render wrapper")
+    parser.add_argument("--surface", choices=SURFACES, default="standard-surface")
     args = parser.parse_args()
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
 
     assert hou.applicationVersionString() == "22.0.466"
     assert hou.licenseCategory() == hou.licenseCategoryType.Indie
-    hip, source = save_scene(output)
+    hip, source = save_scene(output, args.surface)
     before = [hashlib.sha256(path.read_bytes()).hexdigest() for path in (hip, source)]
 
     override = output / "cycles-override.usda"
@@ -161,7 +170,8 @@ def main():
     husk = str(Path(hou.getenv("HFS")) / "bin" / ("husk" + suffix))
     cycles_delegate = "HdCyclesPluginGPU" if args.delegate == "gpu" else "HdCyclesPlugin"
     cycles = [husk, "--renderer", cycles_delegate, "--threads", "4", "-V", "5"]
-    record = {"houdini": hou.applicationVersionString(), "license": str(hou.licenseCategory())}
+    record = {"houdini": hou.applicationVersionString(), "license": str(hou.licenseCategory()),
+              "surface": args.surface}
     record["cycles"] = render_image(cycles, source, output, "cycles")
     assert record["cycles"]["sample_limit"] == KARMA_SAMPLES, record["cycles"]
     record["native_override"] = render_image(cycles, override, output, "cycles-override")
