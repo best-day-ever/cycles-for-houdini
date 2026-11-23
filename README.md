@@ -52,7 +52,8 @@ where the work went.
   periodic, pinned, `varying` widths — rendered as round tubes by default.
 - **USD implicit surfaces** (Sphere, Cube, Cylinder, Cone, Capsule, Plane).
 - **Karma XPU Path Traced Samples** on the active Render Settings prim supplies
-  the sample limit in Hydra and standalone USD renders. An explicit Cycles
+  the sample limit in Hydra and standalone USD renders, including USDs exported
+  with the sample field and no engine tag. An explicit Cycles
   sample count takes precedence, and standalone `--samples` can override both.
 - **Render outputs the way a Karma Render Settings node writes them**: every
   Cycles pass by name, Karma's light-component names and light path

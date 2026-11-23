@@ -1,4 +1,4 @@
-From fba39e9ed8f81c1136663ee6cc114269024df420 Mon Sep 17 00:00:00 2001
+From 30c265d54346888fdc71d89d46632df8c8270136 Mon Sep 17 00:00:00 2001
 From: BDE <dev@bde.run>
 Date: Mon, 23 Nov 2026 12:32:10 +0100
 Subject: [PATCH] hydra: honor Karma XPU Path Traced Samples with Cycles
@@ -6,8 +6,8 @@ Subject: [PATCH] hydra: honor Karma XPU Path Traced Samples with Cycles
 
 ---
  src/hydra/file_reader.cpp     |  4 ++-
- src/hydra/render_delegate.cpp | 57 +++++++++++++++++++++++++++++++----
- 2 files changed, 54 insertions(+), 7 deletions(-)
+ src/hydra/render_delegate.cpp | 61 +++++++++++++++++++++++++++++++----
+ 2 files changed, 58 insertions(+), 7 deletions(-)
 
 diff --git a/src/hydra/file_reader.cpp b/src/hydra/file_reader.cpp
 index 7c0d491..01f3fe3 100644
@@ -25,10 +25,10 @@ index 7c0d491..01f3fe3 100644
          if (attribute.Get(&value, time)) {
            settings_map[attribute.GetName()] = value;
 diff --git a/src/hydra/render_delegate.cpp b/src/hydra/render_delegate.cpp
-index bbbe8d1..ac782ce 100644
+index bbbe8d1..6826eb2 100644
 --- a/src/hydra/render_delegate.cpp
 +++ b/src/hydra/render_delegate.cpp
-@@ -62,6 +62,31 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
+@@ -62,6 +62,35 @@ TF_DEFINE_PRIVATE_TOKENS(_tokens,
  
  namespace {
  
@@ -46,21 +46,25 @@ index bbbe8d1..ac782ce 100644
 +  return it == settings.end() ? 0 : VtValue::Cast<int>(it->second).GetWithDefault(0);
 +}
 +
-+bool IsKarmaXpu(const HdRenderSettingsMap &settings)
++bool MayInheritKarmaSamples(const HdRenderSettingsMap &settings)
 +{
 +  const auto it = settings.find(kKarmaEngine);
 +  if (it == settings.end()) {
-+    return false;
++    return true;
 +  }
-+  const VtValue &engine = it->second;
-+  return engine.IsHolding<TfToken>() ? engine.UncheckedGet<TfToken>() == TfToken("xpu") :
-+                                      engine.GetWithDefault(std::string()) == "xpu";
++  const VtValue &value = it->second;
++  const std::string engine = value.IsHolding<TfToken>() ?
++                                 value.UncheckedGet<TfToken>().GetString() :
++                                 value.GetWithDefault(std::string());
++  /* Some exported stages keep Path Traced Samples and choose XPU via
++   * the render command, with no engine attribute on the USD. */
++  return engine.empty() || engine == "xpu";
 +}
 +
  const TfTokenVector kSupportedRPrimTypes = {
      HdPrimTypeTokens->basisCurves,
      HdPrimTypeTokens->mesh,
-@@ -205,6 +230,7 @@ HdCyclesDelegate::HdCyclesDelegate(const HdRenderSettingsMap &settingsMap,
+@@ -205,6 +234,7 @@ HdCyclesDelegate::HdCyclesDelegate(const HdRenderSettingsMap &settingsMap,
    _renderParam = session_ ? std::make_unique<HdCyclesSession>(session_, keep_nodes) :
                              std::make_unique<HdCyclesSession>(GetSessionParams(settingsMap));
  
@@ -68,7 +72,7 @@ index bbbe8d1..ac782ce 100644
    for (const auto &setting : settingsMap) {
      // Skip over the settings known to be used for initialization only
      if (setting.first == HdCyclesRenderSettingsTokens->device ||
-@@ -459,6 +485,7 @@ VtDictionary HdCyclesDelegate::GetRenderStats() const
+@@ -459,6 +489,7 @@ VtDictionary HdCyclesDelegate::GetRenderStats() const
                           {"rendererVersion", VtValue(GfVec3i(0, 0, 0))},
                           {"percentDone", VtValue(floor_to_int(fractionDone * 100))},
                           {"fractionDone", VtValue(fractionDone)},
@@ -76,7 +80,7 @@ index bbbe8d1..ac782ce 100644
                           {"loadClockTime", VtValue(totalTime - renderTime)},
                           {"peakMemory", VtValue(stats.mem_peak)},
                           {"totalClockTime", VtValue(totalTime)},
-@@ -592,8 +619,12 @@ HdRenderSettingDescriptorList HdCyclesDelegate::GetRenderSettingDescriptors() co
+@@ -592,8 +623,12 @@ HdRenderSettingDescriptorList HdCyclesDelegate::GetRenderSettingDescriptors() co
    descriptors.push_back({
        "Sample Count",
        HdCyclesRenderSettingsTokens->samples,
@@ -90,7 +94,7 @@ index bbbe8d1..ac782ce 100644
    descriptors.push_back({
        "Sample Offset",
        HdCyclesRenderSettingsTokens->sampleOffset,
-@@ -668,11 +699,22 @@ void HdCyclesDelegate::SetRenderSetting(const PXR_NS::TfToken &key, const PXR_NS
+@@ -668,11 +703,22 @@ void HdCyclesDelegate::SetRenderSetting(const PXR_NS::TfToken &key, const PXR_NS
      session->set_time_limit(
          VtValue::Cast<double>(value).GetWithDefault(session->params.time_limit));
    }
@@ -107,8 +111,8 @@ index bbbe8d1..ac782ce 100644
 +     * The same node authors pathtracedsamples even in CPU mode, where it
 +     * does not represent the XPU per-pixel limit. */
 +    int samples = ReadSampleLimit(_settingsMap, HdCyclesRenderSettingsTokens->samples);
-+    if (samples == 0 && IsKarmaXpu(_settingsMap)) {
-+      samples = ReadSampleLimit(_settingsMap, kKarmaPathTracedSamples);
++    if (samples == 0 && MayInheritKarmaSamples(_settingsMap)) {
++      samples = std::max(0, ReadSampleLimit(_settingsMap, kKarmaPathTracedSamples));
 +    }
 +    if (samples == 0) {
 +      samples = ReadSampleLimit(_settingsMap, kInitialSampleLimit);
@@ -118,7 +122,7 @@ index bbbe8d1..ac782ce 100644
    }
    else if (key == HdCyclesRenderSettingsTokens->dicingRate) {
      const float rate = VtValue::Cast<float>(value).GetWithDefault(_renderParam->GetDicingRate());
-@@ -840,6 +882,9 @@ VtValue HdCyclesDelegate::GetRenderSetting(const TfToken &key) const
+@@ -840,6 +886,9 @@ VtValue HdCyclesDelegate::GetRenderSetting(const TfToken &key) const
    Scene *const scene = _renderParam->session->scene.get();
    Session *const session = _renderParam->session;
  

@@ -24,6 +24,7 @@ SETTINGS = "/Render/rendersettings"
 CAMERA = "/World/cameras/chosen"
 RESOLUTION = (144, 96)
 KARMA_SAMPLES = 11
+EXPORTED_SAMPLES = 64
 NATIVE_SAMPLES = 5
 CLI_SAMPLES = 3
 
@@ -143,6 +144,7 @@ def main():
 
     override = output / "cycles-override.usda"
     cpu_karma = output / "karma-cpu-settings.usda"
+    exported_karma = output / "karma-export-without-engine.usda"
     override_stage = Usd.Stage.Open(str(source))
     prim = override_stage.GetPrimAtPath(SETTINGS)
     prim.CreateAttribute("cycles:samples", Sdf.ValueTypeNames.Int).Set(NATIVE_SAMPLES)
@@ -150,6 +152,10 @@ def main():
     prim.RemoveProperty("cycles:samples")
     prim.GetAttribute("karma:global:engine").Set("cpu")
     assert override_stage.Export(str(cpu_karma))
+    prim.RemoveProperty("karma:global:engine")
+    prim.GetAttribute("karma:global:pathtracedsamples").Set(EXPORTED_SAMPLES)
+    assert not prim.GetAttribute("karma:global:engine").HasAuthoredValueOpinion()
+    assert override_stage.Export(str(exported_karma))
 
     suffix = ".exe" if os.name == "nt" else ""
     husk = str(Path(hou.getenv("HFS")) / "bin" / ("husk" + suffix))
@@ -162,12 +168,15 @@ def main():
     assert record["native_override"]["sample_limit"] == NATIVE_SAMPLES
     record["cpu_settings"] = render_image(cycles, cpu_karma, output, "cycles-cpu-settings")
     assert record["cpu_settings"]["sample_limit"] == 1024
+    record["unmarked_export"] = render_image(cycles, exported_karma, output, "cycles-unmarked-export")
+    assert record["unmarked_export"]["sample_limit"] == EXPORTED_SAMPLES
 
     if args.standalone:
         command = [str(args.standalone.resolve()), "--device", args.delegate.upper(),
                    "--threads", "4"]
         for name, stage, extra, count in (
             ("standalone", source, [], KARMA_SAMPLES),
+            ("standalone-unmarked-export", exported_karma, [], EXPORTED_SAMPLES),
             ("standalone-native-override", override, [], NATIVE_SAMPLES),
             ("standalone-cli-override", override, ["--samples", str(CLI_SAMPLES)], CLI_SAMPLES),
         ):
