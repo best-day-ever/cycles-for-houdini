@@ -51,6 +51,9 @@ where the work went.
 - **USD curves where USD puts them** — Bézier, B-spline, Catmull-Rom,
   periodic, pinned, `varying` widths — rendered as round tubes by default.
 - **USD implicit surfaces** (Sphere, Cube, Cylinder, Cone, Capsule, Plane).
+- **Karma XPU Path Traced Samples** on the active Render Settings prim supplies
+  the sample limit in Hydra and standalone USD renders. An explicit Cycles
+  sample count takes precedence, and standalone `--samples` can override both.
 - **Render outputs the way a Karma Render Settings node writes them**: every
   Cycles pass by name, Karma's light-component names and light path
   expressions in Karma's convention, cryptomatte with its manifest, light
