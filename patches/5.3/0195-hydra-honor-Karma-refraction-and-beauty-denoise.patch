@@ -1,0 +1,163 @@
+From 1eb705fe013111e82e48e28a4a511825b9b9881e Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Mon, 23 Nov 2026 15:34:28 +0100
+Subject: [PATCH] Inherit Karma refraction exclusions and beauty denoising
+
+---
+ src/hydra/file_reader.cpp | 72 +++++++++++++++++++++++++++++++++++++++
+ src/hydra/light.cpp       | 33 ++++++++++++++----
+ 2 files changed, 99 insertions(+), 6 deletions(-)
+
+diff --git a/src/hydra/file_reader.cpp b/src/hydra/file_reader.cpp
+index 285788d..9fe9f47 100644
+--- a/src/hydra/file_reader.cpp
++++ b/src/hydra/file_reader.cpp
+@@ -8,4 +8,6 @@
+ #include "hydra/implicit_surface.h"
+
++#include "device/denoise.h"
++
+ #include "util/log.h"
+ #include "util/path.h"
+@@ -15,4 +17,5 @@
+ #include "scene/camera.h"
+
++#include <pxr/base/js/json.h>
+ #include <pxr/base/plug/registry.h>
+ #include <pxr/imaging/hd/flatteningSceneIndex.h>
+@@ -41,4 +44,72 @@
+ HDCYCLES_NAMESPACE_OPEN_SCOPE
+
++namespace {
++
++void InheritKarmaBeautyDenoising(const UsdRenderSettings &settings,
++                                const UsdTimeCode &time,
++                                HdRenderSettingsMap &values)
++{
++  static const TfToken useDenoise("cycles:integrator:use_denoise");
++  if (values.find(useDenoise) != values.end()) {
++    return;
++  }
++
++  static const TfToken imageFilter("karma:global:imagefilter");
++  std::string filterSpec;
++  if (!settings.GetPrim().GetAttribute(imageFilter).Get(&filterSpec, time)) {
++    return;
++  }
++  const JsValue filters = JsParseString(filterSpec);
++  if (!filters.IsArray()) {
++    return;
++  }
++  for (const JsValue &filter : filters.GetJsArray()) {
++    if (!filter.IsArray()) {
++      continue;
++    }
++    const JsArray &entry = filter.GetJsArray();
++    if (entry.size() != 2 || entry[0] != JsValue("denoise") || !entry[1].IsObject()) {
++      continue;
++    }
++    const JsObject &options = entry[1].GetJsObject();
++    const auto engine = options.find("engine");
++    const auto aovs = options.find("aovs");
++    if (engine == options.end() || engine->second != JsValue("oidn") ||
++        aovs == options.end() || !aovs->second.IsArray())
++    {
++      continue;
++    }
++
++    /* The standalone output is beauty. Karma can filter its AOVs independently. */
++    bool beauty = false;
++    for (const JsValue &aov : aovs->second.GetJsArray()) {
++      beauty |= aov == JsValue("C");
++    }
++    if (!beauty) {
++      continue;
++    }
++    const auto getBool = [&options](const char *name, const bool fallback) {
++      const auto it = options.find(name);
++      return it != options.end() && it->second.IsBool() ? it->second.GetBool() : fallback;
++    };
++    int guides = DENOISER_PASS_NONE;
++    if (getBool("use_albedo_input", true)) {
++      guides |= DENOISER_PASS_ALBEDO;
++    }
++    if (getBool("use_n_input", true)) {
++      guides |= DENOISER_PASS_NORMAL;
++    }
++    values.insert({useDenoise, VtValue(true)});
++    values.insert({TfToken("cycles:integrator:denoiser_type"),
++                   VtValue(std::string("openimagedenoise"))});
++    values.insert({TfToken("cycles:integrator:denoiser_passes"), VtValue(guides)});
++    values.insert({TfToken("cycles:integrator:denoise_use_gpu"),
++                   VtValue(!getBool("forcecpu", false))});
++    return;
++  }
++}
++
++}  // namespace
++
+ /* Dummy task whose only purpose is to provide render tag tokens to the render index. */
+ class DummyHdTask : public HdTask {
+@@ -151,4 +222,5 @@ bool HdCyclesFileReader::read(Session *session,
+       }
+     }
++    InheritKarmaBeautyDenoising(render_settings, time, settings_map);
+   }
+
+diff --git a/src/hydra/light.cpp b/src/hydra/light.cpp
+index 9a93c56..c8f2655 100644
+--- a/src/hydra/light.cpp
++++ b/src/hydra/light.cpp
+@@ -22,4 +22,5 @@
+ #include "util/transform.h"
+
++#include <pxr/base/tf/stringUtils.h>
+ #include <pxr/imaging/hd/lightSchema.h>
+ #include <pxr/imaging/hd/materialBindingSchema.h>
+@@ -153,4 +154,12 @@ void HdCyclesLight::Sync(HdSceneDelegate *sceneDelegate,
+     }
+
++    /* USD exposes custom light inputs through the light material network. */
++    const auto network = HdMaterialSchema::GetFromParent(primDs).GetMaterialNetwork();
++    static const TfToken lightTerminal("light");
++    const auto terminalPath = network.GetTerminals().Get(lightTerminal).GetUpstreamNodePath();
++    const TfToken nodeName = terminalPath ? terminalPath->GetTypedValue(0.0f) :
++                                           TfToken(id.GetString());
++    const auto params = network.GetNodes().Get(nodeName).GetParameters();
++
+     if (_lightType == HdPrimTypeTokens->rectLight || _lightType == HdPrimTypeTokens->diskLight) {
+       /* Karma's unit slider follows the square root of the projected cone
+@@ -158,10 +167,4 @@ void HdCyclesLight::Sync(HdSceneDelegate *sceneDelegate,
+       static const TfToken karmaSpread("karma:light:spread");
+       float authored = GetTypedValue<float>(lightDs, karmaSpread, 1.0f);
+-      const auto network = HdMaterialSchema::GetFromParent(primDs).GetMaterialNetwork();
+-      static const TfToken lightTerminal("light");
+-      const auto terminalPath = network.GetTerminals().Get(lightTerminal).GetUpstreamNodePath();
+-      const TfToken nodeName = terminalPath ? terminalPath->GetTypedValue(0.0f) :
+-                                             TfToken(id.GetString());
+-      const auto params = network.GetNodes().Get(nodeName).GetParameters();
+       if (const auto value = HdFloatDataSource::Cast(params.Get(karmaSpread).GetValue())) {
+         authored = value->GetTypedValue(0.0f);
+@@ -192,4 +195,22 @@ void HdCyclesLight::Sync(HdSceneDelegate *sceneDelegate,
+     }
+
++    /* This Karma contribution exclusion maps to the Cycles transmission lobe.
++     * Reset the bit on each parameter sync so clearing the input restores it. */
++    static const TfToken karmaContributions("karma:light:contribs");
++    std::string contributions = GetTypedValue<std::string>(lightDs, karmaContributions, "");
++    if (const auto value = params.Get(karmaContributions).GetValue()) {
++      const VtValue authored = value->GetValue(0.0f);
++      if (authored.IsHolding<std::string>()) {
++        contributions = authored.UncheckedGet<std::string>();
++      }
++      else if (authored.IsHolding<TfToken>()) {
++        contributions = authored.UncheckedGet<TfToken>().GetString();
++      }
++    }
++    _baseVisibility |= PATH_RAY_VISIBILITY_TRANSMIT;
++    if (TfStringTrim(contributions) == "-refract") {
++      _baseVisibility &= ~PATH_RAY_VISIBILITY_TRANSMIT;
++    }
++
+     {
+       auto ds = GetTypedDataSource<bool>(lightDs, HdLightTokens->shadowEnable);

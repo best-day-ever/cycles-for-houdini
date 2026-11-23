@@ -1,0 +1,52 @@
+From 9ecef3288bcc8e767f2bc491db8d561ed981a16f Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Mon, 23 Nov 2026 15:35:57 +0100
+Subject: [PATCH] Apply authored Hydra dome radiance once
+
+---
+ src/hydra/light.cpp | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/src/hydra/light.cpp b/src/hydra/light.cpp
+index c8f2655..a00959c 100644
+--- a/src/hydra/light.cpp
++++ b/src/hydra/light.cpp
+@@ -426,11 +426,12 @@ void HdCyclesLight::PopulateShaderGraph(const HdContainerDataSourceHandle &light
+   if (IsDome()) {
+     BackgroundNode *bgNode = graph->create_node<BackgroundNode>();
+-    // Bake strength into shader graph, since only the shader is used for background lights
++    /* Keep the authored radiance in the world shader. The background light samples it
++     * with unit strength so direct and indirect paths see the same radiance. */
+     if (_sky.valid) {
+-      graph->connect(SkyColor(graph.get(), _light->get_strength()), bgNode->input("Color"));
++      graph->connect(SkyColor(graph.get(), _strength), bgNode->input("Color"));
+       hasSpatialVarying = true;
+     }
+     else {
+-      bgNode->set_color(_light->get_strength());
++      bgNode->set_color(_strength);
+     }
+
+@@ -474,5 +475,5 @@ void HdCyclesLight::PopulateShaderGraph(const HdContainerDataSourceHandle &light
+           VectorMathNode *mathNode = graph->create_node<VectorMathNode>();
+           mathNode->set_math_type(NODE_VECTOR_MATH_MULTIPLY);
+-          mathNode->set_vector2(_light->get_strength());
++          mathNode->set_vector2(_strength);
+
+           graph->connect(blackbodyNode->output("Color"), mathNode->input("Vector1"));
+@@ -665,5 +666,5 @@ void HdCyclesLight::PopulateShaderGraph(const HdContainerDataSourceHandle &light
+           VectorMathNode *mathNode = graph->create_node<VectorMathNode>();
+           mathNode->set_math_type(NODE_VECTOR_MATH_MULTIPLY);
+-          mathNode->set_vector2(_light->get_strength());
++          mathNode->set_vector2(_strength);
+
+           graph->connect(textureNode->output("Color"), mathNode->input("Vector1"));
+@@ -1032,5 +1033,7 @@ void HdCyclesLight::SyncSplit(Scene *scene, HdRenderParam *renderParam)
+   }
+
+-  _light->set_strength(_strength * parts[0].factor);
++  const float3 strength = dome && !is_zero(_strength) ? one_float3() :
++                                                        _strength * parts[0].factor;
++  _light->set_strength(strength);
+   _light->set_cast_shadow(parts[0].shadow);
+   _light->set_use_mis(parts[0].mis);
