@@ -68,6 +68,50 @@ def render(runtime, work, name, scene, device):
     return image[:, :, :3]
 
 
+def qualify_ortho_camera(runtime, work, texture, device):
+    scene = mtlx_scene(texture.name, "").replace("Aperture = 20", "Aperture = 40")
+    shifted_scene = scene.replace("float horizontalAperture = 40",
+                                  "float horizontalAperture = 40\n"
+                                  "float horizontalApertureOffset = 10")
+    first = render(runtime, work, "ortho-camera", scene, device)
+    shifted = render(runtime, work, "ortho-camera-offset", shifted_scene, device)
+    threshold = float(first[..., 0].max()) * 0.5
+    columns = np.flatnonzero(first[32, :, 0] > threshold)
+    shifted_columns = np.flatnonzero(shifted[32, :, 0] > threshold)
+    print(f"Ortho camera: {len(columns)} pixels, shifted {len(shifted_columns)} pixels",
+          flush=True)
+    return threshold > 0 and len(columns) == 32 and np.array_equal(shifted_columns, columns - 16)
+
+
+def qualify_spread(runtime, work, device):
+    receiver = LINK_SCENE[:LINK_SCENE.index('def DistantLight')]
+    passed = True
+    for name, size in (
+        ("RectLight", "float inputs:width = 0.05\nfloat inputs:height = 0.05"),
+        ("DiskLight", "float inputs:radius = 0.025"),
+    ):
+        scenes = []
+        for spread in (1.0, 0.4):
+            scene = receiver + f"""def {name} "key"
+{{
+    {size}
+    bool inputs:normalize = true
+    float inputs:karma:light:spread = {spread}
+    double3 xformOp:translate = (0, 0, 2)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+}}
+"""
+            scenes.append(render(runtime, work, f"{name}-{spread}", scene, device))
+        wide, narrow = scenes
+        center = narrow[31:33, 31:33].mean()
+        extent = wide[30:34, 43:47].mean()
+        outside = narrow[30:34, 43:47].mean()
+        print(f"{name} spread: center {center:.6f}, wide edge {extent:.6f}, "
+              f"focused edge {outside:.6f}", flush=True)
+        passed &= center > 0.5 and extent > 0.01 and outside < 0.001
+    return passed
+
+
 def qualify(runtime, work, device):
     texture = work / "source.exr"
     rgb = np.tile(np.array([0.2, 0.4, 0.6], dtype=np.float32), (8, 8, 1))
@@ -88,7 +132,9 @@ def qualify(runtime, work, device):
     left = image[24:40, 8:24].mean()
     right = image[24:40, 40:56].mean()
     print(f"Linked light: left {left:.6f}, right {right:.6f}", flush=True)
-    return rat_ok and left >= 0.1 and right <= 0.01
+    spread_ok = qualify_spread(runtime, work, device)
+    camera_ok = qualify_ortho_camera(runtime, work, texture, device)
+    return rat_ok and left >= 0.1 and right <= 0.01 and spread_ok and camera_ok
 
 
 def main():

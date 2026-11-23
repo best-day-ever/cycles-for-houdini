@@ -1,0 +1,42 @@
+From 7676c8048ae76d423476fbda83af35d295de848a Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Mon, 23 Nov 2026 14:06:34 +0100
+Subject: [PATCH] Read Karma area light spread from the Hydra light network
+
+---
+ src/hydra/light.cpp | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/src/hydra/light.cpp b/src/hydra/light.cpp
+index 4e810b6..9a93c56 100644
+--- a/src/hydra/light.cpp
++++ b/src/hydra/light.cpp
+@@ -24,4 +24,5 @@
+ #include <pxr/imaging/hd/lightSchema.h>
+ #include <pxr/imaging/hd/materialBindingSchema.h>
++#include <pxr/imaging/hd/materialConnectionSchema.h>
+ #include <pxr/imaging/hd/materialBindingsSchema.h>
+ #include <pxr/imaging/hd/materialNetworkSchema.h>
+@@ -152,4 +153,22 @@ void HdCyclesLight::Sync(HdSceneDelegate *sceneDelegate,
+     }
+
++    if (_lightType == HdPrimTypeTokens->rectLight || _lightType == HdPrimTypeTokens->diskLight) {
++      /* Karma's unit slider follows the square root of the projected cone
++       * angle. Cycles expects the full angle in radians. */
++      static const TfToken karmaSpread("karma:light:spread");
++      float authored = GetTypedValue<float>(lightDs, karmaSpread, 1.0f);
++      const auto network = HdMaterialSchema::GetFromParent(primDs).GetMaterialNetwork();
++      static const TfToken lightTerminal("light");
++      const auto terminalPath = network.GetTerminals().Get(lightTerminal).GetUpstreamNodePath();
++      const TfToken nodeName = terminalPath ? terminalPath->GetTypedValue(0.0f) :
++                                             TfToken(id.GetString());
++      const auto params = network.GetNodes().Get(nodeName).GetParameters();
++      if (const auto value = HdFloatDataSource::Cast(params.Get(karmaSpread).GetValue())) {
++        authored = value->GetTypedValue(0.0f);
++      }
++      const float spread = std::isfinite(authored) ? clamp(authored, 0.0f, 1.0f) : 1.0f;
++      static_cast<AreaLight *>(_light)->set_spread(M_PI_F * spread * spread);
++    }
++
+     const bool normalize = GetTypedValue<bool>(lightDs, HdLightTokens->normalize, false);
+     _light->set_normalize(normalize);
