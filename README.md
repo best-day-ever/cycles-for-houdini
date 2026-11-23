@@ -128,6 +128,11 @@ For someone who does not build software. A pre-built archive is made by `tools/m
 3. Copy **both** into `Documents\houdini22.0\packages\` (create `packages` if it is missing). Nothing in either file names a path of the machine that built them, so there is nothing to edit.
 4. Start Houdini. In Solaris, **Cycles CPU** and **Cycles GPU** appear among the renderers, and the Cycles Material Builder in the LOP tab menu. The device is chosen under *Render › Cycles Render Device*.
 
+Use **Cycles Render Products** to add outputs with their own cameras, ordered
+RenderVars and output colorspaces. Follow it with **Cycles Cryptomatte** to add
+object, material and asset mattes to existing products or write a separate EXR.
+These workflows are based on [hcycles PR 12](https://projects.blender.org/cjhosken/hcycles/pulls/12).
+
 If nothing shows up, start Houdini from a console and read the first lines: a wrong Houdini version names `pxrInternal_v0_26_5`, a misplaced package file shows nothing at all.
 
 ## Building
@@ -149,7 +154,7 @@ once the install exists, with Houdini's Python:
 hython tools/build_cycles_vops.py
 ```
 
-Generate the three Solaris digital assets under the intended Houdini
+Generate the Solaris digital assets under the intended Houdini
 entitlement before packaging. See [native build and license checks](docs/NATIVE_PLATFORMS.md#builds).
 Then assemble the folder with the exact Houdini SDK's `hotl` on PATH:
 

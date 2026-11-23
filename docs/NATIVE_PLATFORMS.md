@@ -31,7 +31,7 @@ CYCLES_INSTALL_DIR=/tmp/cycles-install/h22 hython tools/build_cycles_vops.py
 export HOUDINI_PATH='/tmp/cycles-install/h22/houdini:&'
 export PXR_PLUGINPATH_NAME=/tmp/cycles-install/h22/houdini/dso/usd_plugins
 export CYCLES_HDA_DIR=/tmp/cycles-install/h22/houdini/otls
-for script in build_aovs_hda.py build_render_settings_hda.py build_hda.py; do
+for script in build_aovs_hda.py build_render_settings_hda.py build_hda.py build_solaris_hdas.py; do
   hython "tools/$script" || exit 1
 done
 
@@ -50,12 +50,19 @@ SideFX libraries. Relocate the finished package and test fresh hython/Husk
 processes against that exact installed SDK.
 
 Author Commercial distributions under a Commercial entitlement. Author Indie
-distributions under Indie or Commercial. The three LOP generators build fresh
+distributions under Indie or Commercial. The LOP generators build fresh
 networks from the Python sources using the running Houdini entitlement. The
 packager uses the SDK's `hotl` to refuse embedded Non-Commercial networks,
 including networks inside a library named `.hda`. Use a fresh GUI session of
-the target edition to place and cook all three LOPs, then save and reopen a
+the target edition to place and cook the LOPs, then save and reopen a
 scratch scene. Hython alone can miss a downgrade that occurs in the GUI.
+
+`tests/houdini/verify_solaris_indie.py` exercises the new nodes from a relocated
+package in two GUI processes. Run its `create` and `reopen` phases with separate
+Houdini launches. Render its exported stage through Husk with the Cycles CPU
+delegate for frames 1001 and 1002 and `HOUDINI_OIIO_EXR=1`. Call `verify_images`
+in hython on the resulting directory to check camera selection, channel order,
+full-float Cryptomatte IDs and matching manifests.
 
 For NVIDIA, provide the OptiX SDK with `--optix "$OPTIX_ROOT_DIR"` and a CUDA
 toolkit using `--cmake-arg=-DCUDA_TOOLKIT_ROOT_DIR="$CUDA_ROOT"`. CUDA12.9 builds

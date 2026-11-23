@@ -2,15 +2,36 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
-spec = importlib.util.spec_from_file_location('packaging_bootstrap',
-    Path(__file__).resolve().parents[1] / 'tools/bootstrap.py')
+tools = Path(__file__).resolve().parents[1] / 'tools'
+spec = importlib.util.spec_from_file_location('packaging_bootstrap', tools / 'bootstrap.py')
 bootstrap = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bootstrap)
+dist_spec = importlib.util.spec_from_file_location('packaging_dist', tools / 'make_dist.py')
+dist = importlib.util.module_from_spec(dist_spec)
+with patch.dict('sys.modules', bootstrap=bootstrap):
+    dist_spec.loader.exec_module(dist)
 
 
 class PackagingTests(unittest.TestCase):
+    def test_solaris_assets_and_cook_module_ship_together(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            houdini = Path(temporary)
+            otls = houdini / 'otls'
+            otls.mkdir()
+            (otls / 'hdcycles_render_products.hda').touch()
+            with self.assertRaises(ValueError):
+                dist.verify_solaris_payload(houdini)
+            (otls / 'hdcycles_cryptomatte.hda').touch()
+            with self.assertRaises(ValueError):
+                dist.verify_solaris_payload(houdini)
+            module = houdini / 'python3.13libs/cycles_solaris.py'
+            module.parent.mkdir()
+            module.touch()
+            dist.verify_solaris_payload(houdini)
+
     def test_unresolved_dependency_pointer_cannot_be_published(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -87,6 +87,14 @@ def verify_houdini_assets(otls, hotl):
                     raise ValueError(f"Non-Commercial embedded Houdini network: {library} ({contents.parent.name})")
 
 
+def verify_solaris_payload(houdini):
+    houdini = Path(houdini)
+    libraries = ("hdcycles_render_products.hda", "hdcycles_cryptomatte.hda")
+    if (any(not (houdini / "otls" / name).is_file() for name in libraries)
+            or not any(houdini.glob("python*libs/cycles_solaris.py"))):
+        raise ValueError("Build the Solaris Render Products and Cryptomatte assets with tools/build_solaris_hdas.py")
+
+
 def relocate_linux_delegate(plugin, houdini_runtime=""):
     """Fix file-installed delegates, for which CMake skips install RPATH edits."""
     if not sys.platform.startswith("linux"):
@@ -163,6 +171,7 @@ def main():
         package = f.read()
     if b"@" in package or ABSOLUTE.search(package):
         sys.exit("the package template still holds a build path: " + template)
+    verify_solaris_payload(houdini)
 
     name = args.name or "CyclesForHoudini-" + args.version
     if name != os.path.basename(name) or name in (".", ".."):
