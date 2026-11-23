@@ -1,0 +1,94 @@
+From 70b632f0d4554abaa684d1b08b417c6c0c2f49c4 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Mon, 23 Nov 2026 14:09:37 +0100
+Subject: [PATCH] Keep the USD camera viewplane in standalone renders
+
+---
+ src/app/cycles_standalone.cpp | 13 ++++++++++---
+ src/hydra/file_reader.cpp     |  8 +++++++-
+ src/hydra/file_reader.h       |  4 +++-
+ 3 files changed, 20 insertions(+), 5 deletions(-)
+
+diff --git a/src/app/cycles_standalone.cpp b/src/app/cycles_standalone.cpp
+index ab58978..5cf088e 100644
+--- a/src/app/cycles_standalone.cpp
++++ b/src/app/cycles_standalone.cpp
+@@ -109,6 +109,8 @@ static void scene_init()
+ {
+   options.scene = options.session->scene.get();
+
++  bool use_auto_viewplane = true;
++
+   /* Read XML or USD */
+ #ifdef WITH_USD
+   if (!string_endswith(string_to_lower(options.filepath), ".xml")) {
+@@ -117,11 +119,14 @@ static void scene_init()
+                                               true,
+                                               options.frame,
+                                               options.camera_path.c_str(),
+-                                              options.render_settings_path.c_str()))
++                                              options.render_settings_path.c_str(),
++                                              options.width,
++                                              options.height))
+     {
+       fprintf(stderr, "Failed to read USD scene: %s\n", options.filepath.c_str());
+       exit(EXIT_FAILURE);
+     }
++    use_auto_viewplane = false;
+     const int command_samples = options.session_params.samples;
+     options.session_params = options.session->params;
+     if (options.samples_override) {
+@@ -144,8 +149,10 @@ static void scene_init()
+     options.height = options.scene->camera->get_full_height();
+   }
+
+-  /* Calculate Viewplane */
+-  options.scene->camera->compute_auto_viewplane();
++  /* Keep the USD camera's aperture and offsets. XML uses the automatic frame. */
++  if (use_auto_viewplane) {
++    options.scene->camera->compute_auto_viewplane();
++  }
+ }
+
+ static void session_init()
+diff --git a/src/hydra/file_reader.cpp b/src/hydra/file_reader.cpp
+index 3f05ef4..285788d 100644
+--- a/src/hydra/file_reader.cpp
++++ b/src/hydra/file_reader.cpp
+@@ -72,7 +72,9 @@ bool HdCyclesFileReader::read(Session *session,
+                               const bool use_camera,
+                               const double frame,
+                               const char *camera_path,
+-                              const char *settings_path)
++                              const char *settings_path,
++                              const int width,
++                              const int height)
+ {
+   /* Initialize USD. */
+   PlugRegistry::GetInstance().RegisterPlugins(path_get("usd"));
+@@ -116,6 +118,10 @@ bool HdCyclesFileReader::read(Session *session,
+       session->scene->camera->set_full_height(resolution[1]);
+     }
+   }
++  if (width > 0 && height > 0) {
++    session->scene->camera->set_full_width(width);
++    session->scene->camera->set_full_height(height);
++  }
+   if (!selected_camera.IsEmpty() &&
+       (!selected_camera.IsAbsolutePath() ||
+        !stage->GetPrimAtPath(selected_camera).IsA<UsdGeomCamera>()))
+diff --git a/src/hydra/file_reader.h b/src/hydra/file_reader.h
+index 35c8534..cc66f0a 100644
+--- a/src/hydra/file_reader.h
++++ b/src/hydra/file_reader.h
+@@ -17,7 +17,9 @@ class HdCyclesFileReader {
+                    const bool use_camera = true,
+                    const double frame = 1.0,
+                    const char *camera_path = "",
+-                   const char *settings_path = "");
++                   const char *settings_path = "",
++                   const int width = 0,
++                   const int height = 0);
+ };
+
+ HDCYCLES_NAMESPACE_CLOSE_SCOPE

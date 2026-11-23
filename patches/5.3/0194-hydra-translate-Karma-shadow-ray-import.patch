@@ -1,0 +1,42 @@
+From a6c37c55c4c6fc2ac2a191f677eb7f90e9d008ae Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Mon, 23 Nov 2026 14:27:32 +0100
+Subject: [PATCH] Translate the Karma shadow ray import
+
+---
+ src/hydra/material.cpp | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/src/hydra/material.cpp b/src/hydra/material.cpp
+index 961f0ba..25bb3a4 100644
+--- a/src/hydra/material.cpp
++++ b/src/hydra/material.cpp
+@@ -4762,4 +4762,19 @@ std::string ScatterModeOf(HdMaterialNodeSchema nodeSchema)
+ }
+
++/* Houdini's Ray Import shadow flag matches the Cycles Light Path output.
++ * It can drive opacity so a surface stays visible without blocking shadows. */
++const UsdToCyclesMapping *KarmaRayImportMapping(HdMaterialNodeSchema node)
++{
++  const auto input = node.GetParameters().Get(TfToken("name")).GetValue();
++  const VtValue name = input ? input->GetValue(0.0f) : VtValue();
++  static const std::string kShadow("ray:isshadowray");
++  if (name != VtValue(kShadow) && name != VtValue(TfToken(kShadow))) {
++    return nullptr;
++  }
++  static const UsdToCyclesMapping mapping{
++      "light_path", {{TfToken("name"), ustring("")}, {TfToken("out"), ustring("Is Shadow Ray")}}};
++  return &mapping;
++}
++
+ bool AsksForGlassLobe(HdMaterialNodeSchema nodeSchema)
+ {
+@@ -4835,5 +4850,7 @@ unique_ptr<ShaderGraph> HdCyclesMaterial::BuildShaderGraph(HdMaterialNetworkSche
+         nodeDesc.mapping = sUsdToCyles->missingTextureFor(nodeDesc.mapping, nodeSchema);
+         if (!nodeDesc.mapping) {
+-          nodeDesc.mapping = FindMtlxMapping(nodeTypeId);
++          nodeDesc.mapping = nodeTypeId == "kma_rayimport_bool" ?
++                                 KarmaRayImportMapping(nodeSchema) :
++                                 FindMtlxMapping(nodeTypeId);
+         }
+         /* The separate transmission lobe is only assembled for materials

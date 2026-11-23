@@ -1,0 +1,335 @@
+From a1d74f8cb776457f50e9025b2f1556d57df04b75 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Mon, 23 Nov 2026 13:57:32 +0100
+Subject: [PATCH] Render Karma ramps and Houdini MaterialX gradients
+
+---
+ src/hydra/material.cpp    | 155 +++++++++++++++++++++++++++++++++++++-
+ src/hydra/mtlx_expand.cpp | 116 ++++++++++++++++++++++++++++
+ 2 files changed, 270 insertions(+), 1 deletion(-)
+
+diff --git a/src/hydra/material.cpp b/src/hydra/material.cpp
+index 1219ae0..52c3521 100644
+--- a/src/hydra/material.cpp
++++ b/src/hydra/material.cpp
+@@ -4,6 +4,7 @@
+  * SPDX-License-Identifier: Apache-2.0 */
+
+ #include <algorithm>
++#include <array>
+ #include <set>
+
+ #include "hydra/archive_image.h"
+@@ -3059,10 +3060,23 @@ const UsdToCyclesMapping *FindMtlxVectorTwin(const std::string &nodeTypeId)
+   return nullptr;
+ }
+
++/* Karma writes a scalar coordinate and separate float/color ramp arrays. */
++const UsdToCyclesMapping kKarmaFloatRamp = {
++    "float_curve", {{TfToken("t"), ustring("value")}, {TfToken("out"), ustring("value")}}};
++const UsdToCyclesMapping kKarmaColorRamp = {
++    "rgb_ramp", {{TfToken("t"), ustring("fac")}, {TfToken("out"), ustring("color")}}};
++
+ /* Returns the mapping for a MaterialX nodedef identifier, or null when that
+  * node has no Cycles counterpart yet. */
+ const UsdToCyclesMapping *FindMtlxMapping(const std::string &nodeTypeId)
+ {
++  if (nodeTypeId == "kma_rampconst_float") {
++    return &kKarmaFloatRamp;
++  }
++  if (nodeTypeId == "kma_rampconst_color") {
++    return &kKarmaColorRamp;
++  }
++
+   /* Karma's ST Derivatives (no MaterialX definition, native to Karma), found
+    * in MaterialX networks made for Karma - a shader that sizes an edge or a
+    * filter to the pixel. Cycles' SVM has no derivative of an arbitrary input:
+@@ -3849,6 +3863,140 @@ T SampleRamp(const Array &values, const VtFloatArray &keys, const TfToken &basis
+          0.5f;
+ }
+
++/* A Bezier ramp uses its key positions as X control points. Solve for the
++ * curve parameter on X before evaluating its value on Y. */
++template<typename T>
++T BezierPoint(std::array<T, 4> points, const int degree, const float u)
++{
++  for (int level = degree; level > 0; level--) {
++    for (int j = 0; j < level; j++) {
++      points[j] = points[j] * (1.0f - u) + points[j + 1] * u;
++    }
++  }
++  return points[0];
++}
++
++template<typename Array, typename T = typename Array::value_type>
++T SampleBezierRamp(const Array &values, const VtFloatArray &keys, const float t)
++{
++  const int last = int(keys.size()) - 1;
++  if (last == 0 || t <= keys.front()) {
++    return values.front();
++  }
++  if (t >= keys.back()) {
++    return values.back();
++  }
++  int start = 0;
++  while (start + 3 < last && keys[start + 3] < t) {
++    start += 3;
++  }
++  const int degree = std::min(3, last - start);
++  std::array<float, 4> positions{};
++  std::array<T, 4> control{};
++  for (int i = 0; i <= degree; i++) {
++    positions[i] = keys[start + i];
++    control[i] = values[start + i];
++  }
++
++  float low = 0.0f, high = 1.0f;
++  for (int i = 0; i < 24; i++) {
++    const float mid = 0.5f * (low + high);
++    if (BezierPoint(positions, degree, mid) < t) {
++      low = mid;
++    }
++    else {
++      high = mid;
++    }
++  }
++  return BezierPoint(control, degree, 0.5f * (low + high));
++}
++
++template<typename Array, typename T = typename Array::value_type>
++bool ReadKarmaRamp(HdMaterialNodeParameterContainerSchema params,
++                   const bool scalar,
++                   const ustring &name,
++                   array<T> &table)
++{
++  const std::string prefix = scalar ? "f" : "v";
++  const auto parameter = [&](const char *suffix) {
++    const auto data = params.Get(TfToken(prefix + suffix)).GetValue();
++    return data ? data->GetValue(0.0f) : VtValue();
++  };
++  const VtValue keysParam = parameter("keys");
++  const VtValue valuesParam = parameter("values");
++  const VtValue basisParam = parameter("basis");
++  const VtFloatArray keys = keysParam.GetWithDefault(VtFloatArray{0.0f, 1.0f});
++  const Array values = valuesParam.GetWithDefault(Array{T(0.0f), T(1.0f)});
++  const VtTokenArray basis = basisParam.GetWithDefault(VtTokenArray{});
++  if (keys.empty() || keys.size() != values.size() ||
++      (!basis.empty() && basis.size() != keys.size()) ||
++      !std::is_sorted(keys.begin(), keys.end()) ||
++      !std::all_of(keys.begin(), keys.end(), [](const float key) { return std::isfinite(key); }))
++  {
++    LOG_WARNING << "Invalid Karma ramp keys or values on " << name;
++    return false;
++  }
++
++  static const TfToken linear("linear");
++  static const TfToken bezier("bezier");
++  const bool allBezier = !basis.empty() &&
++                         std::all_of(basis.begin(), basis.end(), [](const TfToken &mode) {
++                           return mode == bezier;
++                         });
++  if (!allBezier && std::any_of(basis.begin(), basis.end(), [](const TfToken &mode) {
++        return mode != linear && mode != kRampBasisConstant && mode != kRampBasisCatmullRom;
++      }))
++  {
++    LOG_WARNING << "Unsupported Karma ramp interpolation on " << name
++                << "; using linear for unsupported segments.";
++  }
++
++  table.resize(RAMP_TABLE_SIZE);
++  for (int i = 0; i < RAMP_TABLE_SIZE; i++) {
++    const float t = float(i) / float(RAMP_TABLE_SIZE - 1);
++    const TfToken &mode = basis.empty() ? linear : basis[RampSegment(keys, t)];
++    table[i] = allBezier ? SampleBezierRamp(values, keys, t) :
++                          SampleRamp<Array, T>(values, keys, mode, t);
++  }
++  return true;
++}
++
++void BakeKarmaRamp(ShaderNode *node,
++                   HdMaterialNodeParameterContainerSchema params,
++                   const bool scalar,
++                   std::set<TfToken> &consumed)
++{
++  for (const char *name : {"framp", "fkeys", "fvalues", "fbasis", "vramp", "vkeys", "vvalues",
++                           "vbasis"})
++  {
++    consumed.insert(TfToken(name));
++  }
++  if (scalar) {
++    array<float> table;
++    if (ReadKarmaRamp<VtFloatArray>(params, true, node->name, table)) {
++      FloatCurveNode *curve = static_cast<FloatCurveNode *>(node);
++      curve->set_curve(table);
++      curve->set_fac(1.0f);
++      curve->set_extrapolate(false);
++    }
++  }
++  else {
++    array<GfVec3f> samples;
++    if (ReadKarmaRamp<VtVec3fArray>(params, false, node->name, samples)) {
++      array<packed_float3> table(samples.size());
++      array<float> alpha(samples.size());
++      for (size_t i = 0; i < samples.size(); i++) {
++        const GfVec3f &value = samples[i];
++        table[i] = make_float3(value[0], value[1], value[2]);
++        alpha[i] = 1.0f;
++      }
++      RGBRampNode *ramp = static_cast<RGBRampNode *>(node);
++      ramp->set_ramp(table);
++      ramp->set_ramp_alpha(alpha);
++    }
++  }
++}
++
+ /* Reassembles the ramps carried by this network and sets them on the node.
+  * The consumed parameters are noted: rewriting them one by one afterwards would
+  * land the key count, an integer, on the array socket itself. */
+@@ -3960,7 +4108,12 @@ void HdCyclesMaterial::UpdateParameters(NodeDesc &nodeDesc,
+                                         const SdfPath &nodePath)
+ {
+   std::set<TfToken> rampParams;
+-  BakeHoudiniRamps(nodeDesc.node, params, rampParams);
++  if (nodeDesc.mapping == &kKarmaFloatRamp || nodeDesc.mapping == &kKarmaColorRamp) {
++    BakeKarmaRamp(nodeDesc.node, params, nodeDesc.mapping == &kKarmaFloatRamp, rampParams);
++  }
++  else {
++    BakeHoudiniRamps(nodeDesc.node, params, rampParams);
++  }
+
+   for (const TfToken &paramName : params.GetNames()) {
+     if (rampParams.find(paramName) != rampParams.end()) {
+diff --git a/src/hydra/mtlx_expand.cpp b/src/hydra/mtlx_expand.cpp
+index 080a660..5e52565 100644
+--- a/src/hydra/mtlx_expand.cpp
++++ b/src/hydra/mtlx_expand.cpp
+@@ -43,6 +43,119 @@ namespace mx = MaterialX;
+
+ namespace {
+
++/* The standalone USD runtime has no Houdini library. Express these two
++ * ramp operations with standard graph nodes so shader-valued inputs survive. */
++void AddHoudiniRampGraph(const mx::DocumentPtr &doc,
++                         const std::string &category,
++                         const std::string &type,
++                         const bool inverse)
++{
++  const std::string id = "ND_" + category + "_" + type;
++  if (doc->getNodeDef(id)) {
++    return;
++  }
++
++  const mx::NodeDefPtr def = doc->addNodeDef(id, type, category);
++  def->addInput("ramp", "float")->setValueString("0");
++  def->addInput("num", "float")->setValueString("0");
++  for (int i = 0; i < 10; i++) {
++    const std::string name = (inverse ? "key" : "value") + std::to_string(i);
++    def->addInput(name, type)->setValueString(type == "color3" ? "0, 0, 0" : "0");
++  }
++  const mx::NodeGraphPtr graph = doc->addNodeGraph("NG_cycles_" + category + "_" + type);
++  graph->setNodeDefString(id);
++
++  /* An unconnected standard input uses its nodedef default. */
++  const auto node = [&](const std::string &op, const std::string &output = "float") {
++    return graph->addNode(op, "n" + std::to_string(graph->getNodes().size()), output);
++  };
++  const auto connect = [](const mx::NodePtr &dst,
++                          const char *port,
++                          const mx::NodePtr &src,
++                          const std::string &portType = "float") {
++    dst->addInput(port, portType)->setConnectedNode(src);
++  };
++  const auto value = [](const mx::NodePtr &dst, const char *port, const std::string &literal) {
++    dst->addInput(port, "float")->setValueString(literal);
++  };
++  const auto input = [](const mx::NodePtr &dst,
++                        const char *port,
++                        const std::string &name,
++                        const std::string &portType = "float") {
++    dst->addInput(port, portType)->setInterfaceName(name);
++  };
++
++  const mx::NodePtr segments = node("subtract");
++  input(segments, "in1", "num");
++  value(segments, "in2", "1");
++
++  mx::NodePtr result;
++  if (inverse) {
++    /* Sum the completed fractions of each active interval, then normalize. */
++    for (int i = 0; i < 9; i++) {
++      const std::string left = "key" + std::to_string(i);
++      const std::string right = "key" + std::to_string(i + 1);
++      const mx::NodePtr length = node("subtract");
++      input(length, "in1", right);
++      input(length, "in2", left);
++      const mx::NodePtr safeLength = node("max");
++      connect(safeLength, "in1", length);
++      value(safeLength, "in2", "0.000001");
++      const mx::NodePtr distance = node("subtract");
++      input(distance, "in1", "ramp");
++      input(distance, "in2", left);
++      const mx::NodePtr fraction = node("divide");
++      connect(fraction, "in1", distance);
++      connect(fraction, "in2", safeLength);
++      const mx::NodePtr inside = node("clamp");
++      connect(inside, "in", fraction);
++      const mx::NodePtr active = node("ifgreatereq");
++      input(active, "value1", "num");
++      value(active, "value2", std::to_string(i + 2));
++      connect(active, "in1", inside);
++      value(active, "in2", "0");
++      const mx::NodePtr sum = node("add");
++      if (result) {
++        connect(sum, "in1", result);
++      }
++      connect(sum, "in2", active);
++      result = sum;
++    }
++    const mx::NodePtr divisor = node("max");
++    connect(divisor, "in1", segments);
++    value(divisor, "in2", "1");
++    const mx::NodePtr normalized = node("divide");
++    connect(normalized, "in1", result);
++    connect(normalized, "in2", divisor);
++    result = normalized;
++  }
++  else {
++    const mx::NodePtr unit = node("clamp");
++    input(unit, "in", "ramp");
++    const mx::NodePtr position = node("multiply");
++    connect(position, "in1", unit);
++    connect(position, "in2", segments);
++    for (int i = 0; i < 9; i++) {
++      const mx::NodePtr offset = node("subtract");
++      connect(offset, "in1", position);
++      value(offset, "in2", std::to_string(i));
++      const mx::NodePtr weight = node("clamp");
++      connect(weight, "in", offset);
++      const mx::NodePtr mix = node("mix", type);
++      input(mix, "fg", "value" + std::to_string(i + 1), type);
++      if (result) {
++        connect(mix, "bg", result, type);
++      }
++      else {
++        input(mix, "bg", "value0", type);
++      }
++      connect(mix, "mix", weight);
++      result = mix;
++    }
++  }
++  graph->addOutput("out", type)->setConnectedNode(result);
++}
++
+ /* The MaterialX node library Houdini ships, read once. `CYCLES_MATERIALX_LIBRARIES`
+  * names a folder holding `libraries/` to read instead; `$HFS/houdini/materialx`
+  * is where Houdini keeps its own, which is also what Karma renders from. */
+@@ -136,6 +249,9 @@ mx::DocumentPtr Library()
+     catch (const std::exception &e) {
+       LOG_WARNING << "MaterialX: could not read the delegate's own nodegraphs: " << e.what();
+     }
++    AddHoudiniRampGraph(doc, "hinvlinear", "float", true);
++    AddHoudiniRampGraph(doc, "huniformramp", "float", false);
++    AddHoudiniRampGraph(doc, "huniformramp", "color3", false);
+     LOG_INFO << "MaterialX: node library read, " << doc->getNodeDefs().size() << " nodedefs.";
+     return doc;
+   }();

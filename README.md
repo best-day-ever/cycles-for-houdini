@@ -51,6 +51,10 @@ where the work went.
 - **USD curves where USD puts them** — Bézier, B-spline, Catmull-Rom,
   periodic, pinned, `varying` widths — rendered as round tubes by default.
 - **USD implicit surfaces** (Sphere, Cube, Cylinder, Cone, Capsule, Plane).
+- **Karma XPU Path Traced Samples** on the active Render Settings prim supplies
+  the sample limit in Hydra and standalone USD renders, including USDs exported
+  with the sample field and no engine tag. An explicit Cycles
+  sample count takes precedence, and standalone `--samples` can override both.
 - **Render outputs the way a Karma Render Settings node writes them**: every
   Cycles pass by name, Karma's light-component names and light path
   expressions in Karma's convention, cryptomatte with its manifest, light
@@ -134,6 +138,14 @@ object, material and asset mattes to existing products or write a separate EXR.
 These workflows are based on [hcycles PR 12](https://projects.blender.org/cjhosken/hcycles/pulls/12).
 
 If nothing shows up, start Houdini from a console and read the first lines: a wrong Houdini version names `pxrInternal_v0_26_5`, a misplaced package file shows nothing at all.
+
+## Existing Karma scenes
+
+Standalone Cycles honors USD light and shadow links. When the image loader
+cannot read a Houdini texture cache named `texture.ext.rat`, it tries the
+adjacent `texture.ext`. Keep the source image accessible to workers or publish
+a portable texture with the USD. Houdini-specific shaders and live COP paths
+can still affect the result.
 
 ## Building
 

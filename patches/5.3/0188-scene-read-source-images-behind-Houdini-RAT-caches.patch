@@ -1,0 +1,112 @@
+From 4cded8041236cb7b797e89297710887c502b30f7 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Mon, 23 Nov 2026 13:30:44 +0100
+Subject: [PATCH] Load the original image when a Houdini RAT cache is
+ unreadable
+
+---
+ src/scene/image_oiio.cpp | 38 ++++++++++++++++++++++++++++----------
+ src/scene/image_oiio.h   |  2 +-
+ 2 files changed, 29 insertions(+), 11 deletions(-)
+
+diff --git a/src/scene/image_oiio.cpp b/src/scene/image_oiio.cpp
+index 12643ef..b413fac 100644
+--- a/src/scene/image_oiio.cpp
++++ b/src/scene/image_oiio.cpp
+@@ -7,6 +7,7 @@
+ #include "util/image.h"
+ #include "util/image_maketx.h"
+ #include "util/image_metadata.h"
++#include "util/log.h"
+ #include "util/path.h"
+ #include "util/progress.h"
+ #include "util/string.h"
+@@ -37,13 +38,13 @@ bool OIIOImageLoader::load_metadata(ImageMetaData &metadata,
+   }
+
+   if (params.use_texture_cache) {
+-    const std::string &filepath = get_filepath();
++    const string filepath = get_filepath();
+     const bool found = resolve_tx(filepath,
+                                   params.texture_cache_path,
+                                   params.colorspace,
+                                   params.alpha_type,
+                                   IMAGE_FORMAT_PLAIN,
+-                                  texture_cache_filepath_,
++                                  resolved_filepath_,
+                                   metadata);
+
+     if (found) {
+@@ -54,26 +55,43 @@ bool OIIOImageLoader::load_metadata(ImageMetaData &metadata,
+       progress.set_status("Generating tx cache | " + path_filename(filepath), "");
+
+       if (!make_tx(filepath,
+-                   texture_cache_filepath_,
++                   resolved_filepath_,
+                    params.colorspace,
+                    params.alpha_type,
+                    IMAGE_FORMAT_PLAIN))
+       {
+-        texture_cache_filepath_.clear();
++        resolved_filepath_.clear();
+         params.tx_failure_num++;
+       }
+     }
+     else {
+-      texture_cache_filepath_.clear();
++      resolved_filepath_.clear();
+     }
+   }
+
+-  if (!metadata.oiio_load_metadata(get_filepath())) {
+-    params.load_failure_num++;
+-    return false;
++  if (metadata.oiio_load_metadata(get_filepath())) {
++    return true;
+   }
+
+-  return true;
++  /* Houdini's texture conversion can append .rat to the source filename.
++   * Use the adjacent source image if OIIO cannot read the converted texture. */
++  if (resolved_filepath_.empty() &&
++      string_endswith(string_to_lower(original_filepath_), ".rat"))
++  {
++    const string source = original_filepath_.substr(0, original_filepath_.size() - 4);
++    const string name = path_filename(source);
++    const size_t extension = name.find_last_of('.');
++    if (extension != string::npos && extension > 0 && extension + 1 < name.size() &&
++        path_exists(source) && metadata.oiio_load_metadata(source))
++    {
++      resolved_filepath_ = source;
++      LOG_INFO_IMPORTANT << "Using source texture " << source << " for " << original_filepath_;
++      return true;
++    }
++  }
++
++  params.load_failure_num++;
++  return false;
+ }
+
+ bool OIIOImageLoader::load_pixels(const ImageMetaData &metadata, void *pixels)
+@@ -451,7 +469,7 @@ string OIIOImageLoader::name() const
+
+ const string &OIIOImageLoader::get_filepath() const
+ {
+-  return (texture_cache_filepath_.empty()) ? original_filepath_ : texture_cache_filepath_;
++  return resolved_filepath_.empty() ? original_filepath_ : resolved_filepath_;
+ }
+
+ bool OIIOImageLoader::equals(const ImageLoader &other) const
+diff --git a/src/scene/image_oiio.h b/src/scene/image_oiio.h
+index ae15536..0f82f80 100644
+--- a/src/scene/image_oiio.h
++++ b/src/scene/image_oiio.h
+@@ -44,7 +44,7 @@ class OIIOImageLoader : public ImageLoader {
+   const string &get_filepath() const;
+
+   string original_filepath_;
+-  string texture_cache_filepath_;
++  string resolved_filepath_;  /* Texture cache or readable source image. */
+   CacheHandle<ImageInput> texture_cache_file_handle;
+   bool texture_cache_file_handle_failed = false;
+ };

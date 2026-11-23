@@ -1,0 +1,47 @@
+From a72cb1335adfbcee65aee0913fd37c23cf82da23 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Mon, 23 Nov 2026 13:34:44 +0100
+Subject: [PATCH] Preserve USD light linking in standalone renders
+
+---
+ src/hydra/file_reader.cpp | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/hydra/file_reader.cpp b/src/hydra/file_reader.cpp
+index 01f3fe3..3f05ef4 100644
+--- a/src/hydra/file_reader.cpp
++++ b/src/hydra/file_reader.cpp
+@@ -28,6 +28,7 @@
+ #include <pxr/imaging/hd/tokens.h>
+ #include <pxr/imaging/hdsi/extComputationPrimvarPruningSceneIndex.h>
+ #include <pxr/imaging/hdsi/legacyDisplayStyleOverrideSceneIndex.h>
++#include <pxr/imaging/hdsi/lightLinkingSceneIndex.h>
+ #include <pxr/usd/usd/primRange.h>
+ #include <pxr/usd/usd/stage.h>
+ #include <pxr/usd/usdGeom/camera.h>
+@@ -153,14 +154,12 @@ bool HdCyclesFileReader::read(Session *session,
+   /* Set up scene index from USD stage for easy consumption.
+    * Do ext computation (e.g. skinning), flattening and resolve material bindings. */
+   UsdImagingStageSceneIndexRefPtr stage_si = UsdImagingStageSceneIndex::New(nullptr);
+-  stage_si->SetStage(stage);
+-  stage_si->SetTime(time);
+-
+   HdSceneIndexBaseRefPtr filtered = stage_si;
+   filtered = HdSiExtComputationPrimvarPruningSceneIndex::New(filtered);
+   filtered = HdFlatteningSceneIndex::New(filtered, UsdImagingFlattenedDataSourceProviders());
+   filtered = UsdImagingMaterialBindingsResolvingSceneIndex::New(filtered, nullptr);
+   filtered = HdCyclesImplicitSurfaceSceneIndex::New(filtered);
++  filtered = HdsiLightLinkingSceneIndex::New(filtered, nullptr);
+
+   /* Provide DummyHdTask as a task prim to the scene index. */
+   HdRprimCollection collection(HdTokens->geometry, HdReprSelector(HdReprTokens->smoothHull));
+@@ -189,6 +188,9 @@ bool HdCyclesFileReader::read(Session *session,
+   const bool needs_prefixing = false;
+   render_index->InsertSceneIndex(merging_si, root_path, needs_prefixing);
+
++  /* Register the filter chain before USD publishes its lights and collections. */
++  stage_si->SetStage(stage);
++  stage_si->SetTime(time);
+   stage_si->ApplyPendingUpdates();
+
+   render_index->EnqueueCollectionToSync(collection);

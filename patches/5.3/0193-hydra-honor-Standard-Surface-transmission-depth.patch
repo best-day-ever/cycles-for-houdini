@@ -1,0 +1,201 @@
+From 443e58761219ed48b20d8b54215cf173f051940f Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Mon, 23 Nov 2026 14:25:13 +0100
+Subject: [PATCH] Translate Standard Surface transmission depth into interior
+ absorption
+
+---
+ src/hydra/material.cpp    |  10 ++--
+ src/hydra/mtlx_expand.cpp | 107 +++++++++++++++++++++++++++++++++++++-
+ src/hydra/mtlx_expand.h   |   4 +-
+ 3 files changed, 115 insertions(+), 6 deletions(-)
+
+diff --git a/src/hydra/material.cpp b/src/hydra/material.cpp
+index 52c3521..961f0ba 100644
+--- a/src/hydra/material.cpp
++++ b/src/hydra/material.cpp
+@@ -3634,7 +3634,8 @@ std::vector<HdCyclesGeomPropDefault> CollectGeomPropDefaults(HdMaterialNetworkSc
+ /* The network of a material prim the delegate translates: its Cycles one, else
+  * its MaterialX or Karma one, else the universal one; MaterialX nodegraphs
+  * expanded and every input left unwritten given its nodedef's default. */
+-HdMaterialNetworkSchema ReadMaterialNetwork(const HdContainerDataSourceHandle &primDs)
++HdMaterialNetworkSchema ReadMaterialNetwork(const HdContainerDataSourceHandle &primDs,
++                                            const float metersPerUnit)
+ {
+   HdMaterialSchema matSchema = HdMaterialSchema::GetFromParent(primDs);
+   /* Prefer cycles network if it exists, otherwise use universal network. */
+@@ -3668,7 +3669,7 @@ HdMaterialNetworkSchema ReadMaterialNetwork(const HdContainerDataSourceHandle &p
+     }
+     const UsdToCyclesMapping *mapping = FindMtlxMapping(nodeTypeId);
+     return mapping != nullptr && NodeType::find(mapping->nodeType()) != nullptr;
+-  });
++  }, metersPerUnit);
+   /* Then every MaterialX input left unwritten takes its nodedef's
+    * default, so that no Cycles default stands in for a MaterialX one. */
+   return CompleteMaterialXDefaults(
+@@ -3692,7 +3693,7 @@ unique_ptr<ShaderGraph> HdCyclesMaterial::BuildWorldGraph(HdSceneDelegate *scene
+                                                           Scene *scene)
+ {
+   const HdMaterialNetworkSchema network = ReadMaterialNetwork(
+-      GetPrim(sceneDelegate, GetId()).dataSource);
++      GetPrim(sceneDelegate, GetId()).dataSource, 1.0f);
+   if (!network) {
+     LOG_WARNING << "No material network at " << GetId().GetString()
+                 << ", bound to a dome light; the dome keeps its own shader.";
+@@ -3728,7 +3729,8 @@ void HdCyclesMaterial::Sync(HdSceneDelegate *sceneDelegate,
+
+   if (dirtyResource || dirtyParams) {
+     const HdMaterialNetworkSchema network = ReadMaterialNetwork(
+-        GetPrim(sceneDelegate, id).dataSource);
++        GetPrim(sceneDelegate, id).dataSource,
++        static_cast<HdCyclesSession *>(renderParam)->GetStageMetersPerUnit());
+
+     const SceneLock lock(renderParam);
+
+diff --git a/src/hydra/mtlx_expand.cpp b/src/hydra/mtlx_expand.cpp
+index 5e52565..d87fd22 100644
+--- a/src/hydra/mtlx_expand.cpp
++++ b/src/hydra/mtlx_expand.cpp
+@@ -1719,6 +1719,109 @@ bool FoldVdfAbsorption(Network &net)
+   return any;
+ }
+
++/* Standard Surface uses surface tint at zero depth and Beer-Lambert
++ * extinction inside the material at positive depth. Keep the depth as a
++ * wire when it comes from a texture or ramp. The Cycles volume runs in
++ * metres, while the authored depth is in stage units. */
++bool FoldTransmissionDepth(Network &net, const float metersPerUnit)
++{
++  static const TfToken kSurface("surface"), kVolume("volume");
++  static const TfToken kDepth("transmission_depth"), kColor("transmission_color"),
++      kTransmission("transmission"), kThin("thin_walled");
++  const auto terminal = net.terminals.find(kSurface);
++  if (terminal == net.terminals.end() || net.terminals.count(kVolume) ||
++      net.terminals.count(TfToken("cycles:volume")))
++  {
++    return false;
++  }
++
++  const TfToken &sourceName = terminal->second.upstream;
++  const auto source = net.nodes.find(sourceName);
++  if (source == net.nodes.end() ||
++      !source->second.typeId.GetString().starts_with("ND_standard_surface_surfaceshader"))
++  {
++    return false;
++  }
++
++  Node &surface = source->second;
++  const auto wired = [&](const TfToken &input) {
++    const auto it = surface.conns.find(input);
++    return it != surface.conns.end() && !it->second.empty();
++  };
++  const auto thin = surface.params.find(kThin);
++  if ((!wired(kDepth) && !surface.params.count(kDepth)) || wired(kThin) ||
++      (thin != surface.params.end() && thin->second.GetWithDefault(false)))
++  {
++    return false;
++  }
++
++  const auto make = [&](const char *suffix, const char *type) {
++    const TfToken name(Prefix(sourceName, suffix));
++    net.nodes[name].typeId = TfToken(type);
++    return Conn{name, kOut};
++  };
++  const auto connect = [&](const Conn &dst, const char *port, const Conn &src) {
++    net.nodes[dst.upstream].conns[TfToken(port)] = {src};
++  };
++  const auto set = [&](const Conn &dst, const char *port, const VtValue &v) {
++    net.nodes[dst.upstream].params[TfToken(port)] = v;
++  };
++  const auto transfer = [&](const Conn &dst, const char *port, const TfToken &name, const VtValue &v) {
++    if (wired(name)) {
++      net.nodes[dst.upstream].conns[TfToken(port)] = surface.conns.at(name);
++    }
++    else {
++      const auto it = surface.params.find(name);
++      set(dst, port, it != surface.params.end() ? it->second : v);
++    }
++  };
++
++  const Conn depth = make("cycles_transmission_depth", "ND_ifgreater_float");
++  transfer(depth, "value1", kTransmission, VtValue(0.0f));
++  transfer(depth, "in1", kDepth, VtValue(0.0f));
++  set(depth, "value2", VtValue(0.0f));
++  set(depth, "in2", VtValue(0.0f));
++
++  const Conn safeDepth = make("cycles_transmission_safe_depth", "ND_max_float");
++  connect(safeDepth, "in1", depth);
++  set(safeDepth, "in2", VtValue(1e-6f));
++  const Conn invDepth = make("cycles_transmission_inv_depth", "ND_divide_float");
++  set(invDepth, "in1", VtValue(-1.0f / std::max(metersPerUnit, 1e-6f)));
++  connect(invDepth, "in2", safeDepth);
++  const Conn scale = make("cycles_transmission_scale", "ND_ifgreater_float");
++  connect(scale, "value1", depth);
++  set(scale, "value2", VtValue(0.0f));
++  connect(scale, "in1", invDepth);
++  set(scale, "in2", VtValue(0.0f));
++
++  const VtValue white(GfVec3f(1.0f));
++  const Conn clamped = make("cycles_transmission_clamp", "ND_clamp_color3");
++  transfer(clamped, "in", kColor, white);
++  set(clamped, "low", VtValue(GfVec3f(1e-6f)));
++  set(clamped, "high", white);
++  const Conn log = make("cycles_transmission_log", "ND_ln_color3");
++  connect(log, "in", clamped);
++  const Conn sigma = make("cycles_transmission_extinction", "ND_multiply_color3FA");
++  connect(sigma, "in1", log);
++  connect(sigma, "in2", scale);
++
++  const Conn absorption = make("cycles_transmission_absorption", "ND_absorption_vdf");
++  connect(absorption, "absorption", sigma);
++  net.terminals[kVolume] = absorption;
++
++  const Conn tint = make("cycles_transmission_tint", "ND_ifgreater_color3");
++  connect(tint, "value1", depth);
++  set(tint, "value2", VtValue(0.0f));
++  set(tint, "in1", white);
++  transfer(tint, "in2", kColor, white);
++  surface.conns[kColor] = {tint};
++  surface.params[kColor] = VtValue();
++  surface.conns[kDepth].clear();
++  surface.params[kDepth] = VtValue();
++  surface.paramsEdited = true;
++  return true;
++}
++
+ /* `layer` weighs its top by a Fresnel term at an IOR of 1.5 (the mapping,
+  * K-09). When the top is a `dielectric_bsdf` whose IOR is a value, the
+  * weight takes that IOR instead - layer_weight's blend is 1 - 1 / ior - so
+@@ -2413,7 +2516,8 @@ bool Expandable(const std::string &id)
+ }  // namespace
+
+ HdMaterialNetworkSchema ExpandMaterialXNodegraphs(HdMaterialNetworkSchema network,
+-                                                  const HdCyclesNodeTranslatable &translatable)
++                                                  const HdCyclesNodeTranslatable &translatable,
++                                                  const float metersPerUnit)
+ {
+   /* Nothing to do for a network without a MaterialX node the delegate lacks:
+    * the common case, which must stay free. */
+@@ -2473,6 +2577,7 @@ HdMaterialNetworkSchema ExpandMaterialXNodegraphs(HdMaterialNetworkSchema networ
+   }
+   net.changed |= FoldThinFilm(net);
+   net.changed |= FoldSurfaceBase(net);
++  net.changed |= FoldTransmissionDepth(net, metersPerUnit);
+   /* Before the weights: a weighted coat gets a multiply between it and its
+    * layer, behind which the layer would no longer see the dielectric's IOR. */
+   net.changed |= FoldLayerIor(net);
+diff --git a/src/hydra/mtlx_expand.h b/src/hydra/mtlx_expand.h
+index dba0a7e..f1c792d 100644
+--- a/src/hydra/mtlx_expand.h
++++ b/src/hydra/mtlx_expand.h
+@@ -34,7 +34,9 @@ using HdCyclesInputAccepted =
+  * `separate` node read on the indexed output, `swizzle` a `separate` and a
+  * `combine`. Returns the network as it came when nothing needed expanding. */
+ PXR_NS::HdMaterialNetworkSchema ExpandMaterialXNodegraphs(
+-    PXR_NS::HdMaterialNetworkSchema network, const HdCyclesNodeTranslatable &translatable);
++    PXR_NS::HdMaterialNetworkSchema network,
++    const HdCyclesNodeTranslatable &translatable,
++    float metersPerUnit);
+
+ /* Authors, on every MaterialX node of the network, each input the network
+  * leaves unwritten with the value its nodedef gives it. Hydra forwards only
