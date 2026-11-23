@@ -139,6 +139,14 @@ These workflows are based on [hcycles PR 12](https://projects.blender.org/cjhosk
 
 If nothing shows up, start Houdini from a console and read the first lines: a wrong Houdini version names `pxrInternal_v0_26_5`, a misplaced package file shows nothing at all.
 
+## Existing Karma scenes
+
+Standalone Cycles honors USD light and shadow links. When the image loader
+cannot read a Houdini texture cache named `texture.ext.rat`, it tries the
+adjacent `texture.ext`. Keep the source image accessible to workers or publish
+a portable texture with the USD. Houdini-specific shaders and live COP paths
+can still affect the result.
+
 ## Building
 
 Cycles itself is not vendored here. The build clones it at the pinned commit,
